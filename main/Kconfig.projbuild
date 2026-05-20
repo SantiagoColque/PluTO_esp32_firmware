@@ -1,0 +1,39 @@
+menu "PluTO Firmware Configuration"
+
+    config WIFI_SSID
+        string "WiFi SSID"
+        default ""
+        help
+            SSID of the WiFi network the device will join.
+
+    config WIFI_PASSWORD
+        string "WiFi password"
+        default ""
+        help
+            Password of the WiFi network the device will join.
+
+    config MQTT_BROKER_URI
+        string "MQTT broker URI"
+        default "mqtt://192.168.1.3:1883"
+        help
+            URI of the Mosquitto broker, for example mqtt://192.168.1.3:1883.
+
+    config MQTT_BROKER_USERNAME
+        string "MQTT broker username"
+        default ""
+        help
+            Username used to authenticate against the MQTT broker.
+
+    config MQTT_BROKER_PASSWORD
+        string "MQTT broker password"
+        default ""
+        help
+            Password used to authenticate against the MQTT broker.
+
+    config MQTT_TOPIC_SUBSCRIPTION
+        string "MQTT device registration topic"
+        default "device/subscription"
+        help
+            Generic topic where the device publishes its user_id to request a control subscription.
+
+endmenu
