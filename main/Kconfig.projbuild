@@ -30,10 +30,10 @@ menu "PluTO Firmware Configuration"
         help
             Password used to authenticate against the MQTT broker.
 
-    config MQTT_TOPIC_COORDINATES
-        string "MQTT coordinates topic"
-        default "station/motors/coordinates"
+    config MQTT_TOPIC_SUBSCRIPTION
+        string "MQTT device registration topic"
+        default "device/subscription"
         help
-            Topic where the central server publishes target coordinates.
+            Generic topic where the device publishes its user_id to request a control subscription.
 
 endmenu

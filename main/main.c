@@ -22,6 +22,7 @@ static void coordinates_message_handler(const char *topic,
 
 void app_main(void)
 {
+    char device_id[WIFI_DEVICE_ID_LEN];
     esp_err_t ret = nvs_flash_init();
 
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -31,5 +32,8 @@ void app_main(void)
 
     ESP_ERROR_CHECK(ret);
     ESP_ERROR_CHECK(wifi_manager_init());
-    ESP_ERROR_CHECK(mqtt_manager_init(coordinates_message_handler));
+    ESP_ERROR_CHECK(wifi_manager_get_device_id(device_id, sizeof(device_id)));
+
+    ESP_LOGI(TAG, "Using user_id: %s", device_id);
+    ESP_ERROR_CHECK(mqtt_manager_init(coordinates_message_handler, device_id));
 }

@@ -1,7 +1,9 @@
 #include "wifi_manager.h"
 
+#include <stdio.h>
 #include <string.h>
 
+#include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -120,4 +122,31 @@ esp_err_t wifi_manager_init(void)
 bool wifi_manager_is_connected(void)
 {
     return s_wifi_connected;
+}
+
+esp_err_t wifi_manager_get_device_id(char *buf, size_t buf_len)
+{
+    uint8_t mac[6];
+
+    if (buf == NULL || buf_len < WIFI_DEVICE_ID_LEN) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_wifi_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_RETURN_ON_ERROR(esp_wifi_get_mac(WIFI_IF_STA, mac), TAG, "Unable to read station MAC address");
+
+    snprintf(buf,
+             buf_len,
+             "%02x%02x%02x%02x%02x%02x",
+             mac[0],
+             mac[1],
+             mac[2],
+             mac[3],
+             mac[4],
+             mac[5]);
+
+    return ESP_OK;
 }

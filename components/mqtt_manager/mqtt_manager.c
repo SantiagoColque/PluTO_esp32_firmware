@@ -1,8 +1,12 @@
 #include "mqtt_manager.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "esp_log.h"
 #include "mqtt_client.h"
 #include "sdkconfig.h"
+#include "wifi_manager.h"
 
 #ifndef CONFIG_MQTT_BROKER_USERNAME
 #define CONFIG_MQTT_BROKER_USERNAME ""
@@ -12,11 +16,18 @@
 #define CONFIG_MQTT_BROKER_PASSWORD ""
 #endif
 
+#ifndef CONFIG_MQTT_TOPIC_SUBSCRIPTION
+#define CONFIG_MQTT_TOPIC_SUBSCRIPTION "device/subscription"
+#endif
+
+#define MQTT_CONTROL_TOPIC_LEN 64
+
 static const char *TAG = "mqtt_manager";
 
 static esp_mqtt_client_handle_t s_client;
 static mqtt_data_cb_t s_data_cb;
 static bool s_mqtt_connected;
+static char s_device_id[WIFI_DEVICE_ID_LEN];
 
 static void mqtt_event_handler(void *handler_args,
                                esp_event_base_t base,
@@ -30,11 +41,34 @@ static void mqtt_event_handler(void *handler_args,
 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
+    {
+        char control_topic[MQTT_CONTROL_TOPIC_LEN];
+        int registration_msg_id;
+        int subscribe_msg_id;
+
         s_mqtt_connected = true;
         ESP_LOGI(TAG, "Connected to broker: %s", CONFIG_MQTT_BROKER_URI);
-        esp_mqtt_client_subscribe(s_client, CONFIG_MQTT_TOPIC_COORDINATES, 1);
-        ESP_LOGI(TAG, "Subscribed to: %s", CONFIG_MQTT_TOPIC_COORDINATES);
+
+        registration_msg_id = esp_mqtt_client_publish(s_client,
+                                                      CONFIG_MQTT_TOPIC_SUBSCRIPTION,
+                                                      s_device_id,
+                                                      0,
+                                                      1,
+                                                      0);
+        ESP_LOGI(TAG,
+                 "Published device registration to %s with user_id=%s (msg_id=%d)",
+                 CONFIG_MQTT_TOPIC_SUBSCRIPTION,
+                 s_device_id,
+                 registration_msg_id);
+
+        snprintf(control_topic,
+                 sizeof(control_topic),
+                 "control/%s/coordinates",
+                 s_device_id);
+        subscribe_msg_id = esp_mqtt_client_subscribe(s_client, control_topic, 1);
+        ESP_LOGI(TAG, "Subscribed to: %s (msg_id=%d)", control_topic, subscribe_msg_id);
         break;
+    }
 
     case MQTT_EVENT_DISCONNECTED:
         s_mqtt_connected = false;
@@ -67,10 +101,15 @@ static void mqtt_event_handler(void *handler_args,
     }
 }
 
-esp_err_t mqtt_manager_init(mqtt_data_cb_t data_cb)
+esp_err_t mqtt_manager_init(mqtt_data_cb_t data_cb, const char *device_id)
 {
     if (s_client != NULL) {
         return ESP_OK;
+    }
+
+    if (device_id == NULL || device_id[0] == '\0') {
+        ESP_LOGE(TAG, "device_id is empty");
+        return ESP_ERR_INVALID_ARG;
     }
 
     if (CONFIG_MQTT_BROKER_URI[0] == '\0') {
@@ -84,6 +123,7 @@ esp_err_t mqtt_manager_init(mqtt_data_cb_t data_cb)
     }
 
     s_data_cb = data_cb;
+    strlcpy(s_device_id, device_id, sizeof(s_device_id));
 
     const esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = CONFIG_MQTT_BROKER_URI,
