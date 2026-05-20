@@ -56,7 +56,7 @@ static void mqtt_event_handler(void *handler_args,
                                                       1,
                                                       0);
         ESP_LOGI(TAG,
-                 "Published device registration to %s with user_id=%s (msg_id=%d)",
+                 "Published device registration to %s with device_id=%s (msg_id=%d)",
                  CONFIG_MQTT_TOPIC_SUBSCRIPTION,
                  s_device_id,
                  registration_msg_id);
