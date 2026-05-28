@@ -36,4 +36,16 @@ menu "PluTO Firmware Configuration"
         help
             Generic topic where the device publishes its user_id to request a control subscription.
 
+    config NTP_SERVER
+        string "NTP server"
+        default "pool.ntp.org"
+        help
+            Hostname of the NTP server used to synchronize the ESP32 clock.
+
+    config NTP_TIMEZONE
+        string "Local timezone"
+        default "UTC0"
+        help
+            POSIX timezone string applied after the clock is synchronized.
+
 endmenu

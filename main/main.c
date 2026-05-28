@@ -3,6 +3,7 @@
 #include "nvs_flash.h"
 
 #include "mqtt_manager.h"
+#include "sntp_manager.h"
 #include "wifi_manager.h"
 
 static const char *TAG = "pluto_main";
@@ -32,6 +33,7 @@ void app_main(void)
 
     ESP_ERROR_CHECK(ret);
     ESP_ERROR_CHECK(wifi_manager_init());
+    ESP_ERROR_CHECK(sntp_manager_init());
     ESP_ERROR_CHECK(wifi_manager_get_device_id(device_id, sizeof(device_id)));
 
     ESP_LOGI(TAG, "Using device_id: %s", device_id);
