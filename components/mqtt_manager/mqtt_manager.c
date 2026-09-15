@@ -3,18 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "config_store.h"
 #include "esp_log.h"
 #include "mqtt_client.h"
 #include "sdkconfig.h"
 #include "wifi_manager.h"
-
-#ifndef CONFIG_MQTT_BROKER_USERNAME
-#define CONFIG_MQTT_BROKER_USERNAME ""
-#endif
-
-#ifndef CONFIG_MQTT_BROKER_PASSWORD
-#define CONFIG_MQTT_BROKER_PASSWORD ""
-#endif
 
 #ifndef CONFIG_MQTT_TOPIC_SUBSCRIPTION
 #define CONFIG_MQTT_TOPIC_SUBSCRIPTION "device/subscription"
@@ -47,7 +40,7 @@ static void mqtt_event_handler(void *handler_args,
         int subscribe_msg_id;
 
         s_mqtt_connected = true;
-        ESP_LOGI(TAG, "Connected to broker: %s", CONFIG_MQTT_BROKER_URI);
+        ESP_LOGI(TAG, "Connected to broker: %s", config_store_peek()->mqtt_uri);
 
         registration_msg_id = esp_mqtt_client_publish(s_client,
                                                       CONFIG_MQTT_TOPIC_SUBSCRIPTION,
@@ -103,6 +96,10 @@ static void mqtt_event_handler(void *handler_args,
 
 esp_err_t mqtt_manager_init(mqtt_data_cb_t data_cb, const char *device_id)
 {
+    /* Borrowed rather than copied: esp-mqtt duplicates these strings when the
+     * client is created, and the cache outlives the call either way. */
+    const pluto_config_t *cfg = config_store_peek();
+
     if (s_client != NULL) {
         return ESP_OK;
     }
@@ -112,23 +109,22 @@ esp_err_t mqtt_manager_init(mqtt_data_cb_t data_cb, const char *device_id)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (CONFIG_MQTT_BROKER_URI[0] == '\0') {
-        ESP_LOGE(TAG, "CONFIG_MQTT_BROKER_URI is empty; set it with idf.py menuconfig");
+    if (cfg->mqtt_uri[0] == '\0') {
+        ESP_LOGE(TAG, "No broker URI stored; set one from the dashboard");
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (CONFIG_MQTT_BROKER_USERNAME[0] == '\0') {
-        ESP_LOGW(TAG,
-                 "MQTT username is empty; if the broker requires authentication, update sdkconfig with idf.py menuconfig");
+    if (cfg->mqtt_username[0] == '\0') {
+        ESP_LOGW(TAG, "MQTT username is empty; set one from the dashboard if the broker requires authentication");
     }
 
     s_data_cb = data_cb;
     strlcpy(s_device_id, device_id, sizeof(s_device_id));
 
     const esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = CONFIG_MQTT_BROKER_URI,
-        .credentials.username = CONFIG_MQTT_BROKER_USERNAME,
-        .credentials.authentication.password = CONFIG_MQTT_BROKER_PASSWORD,
+        .broker.address.uri = cfg->mqtt_uri,
+        .credentials.username = cfg->mqtt_username,
+        .credentials.authentication.password = cfg->mqtt_password,
     };
 
     s_client = esp_mqtt_client_init(&mqtt_cfg);

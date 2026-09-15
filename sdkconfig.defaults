@@ -2,3 +2,19 @@ CONFIG_IDF_TARGET="esp32"
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+
+# Custom table: the stock single-app layout caps the app at 1 MB.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# esp_http_server reserves max_open_sockets + 3 descriptors. With the default 7
+# it would claim all 10 sockets and leave none for MQTT or the captive DNS
+# server, which then fail at runtime without an obvious error.
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# SoftAP provisioning.
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+CONFIG_LWIP_DHCPS=y
+
+# -Og costs roughly 15% of the image for no benefit in a release build.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

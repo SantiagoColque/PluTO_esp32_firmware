@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PluTO</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c1f23;--muted:#6b7280;--line:#e3e6ea;--accent:#2563eb;--ok:#15803d;--warn:#b45309;--err:#b91c1c}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--card:#1d2125;--fg:#e8eaed;--muted:#9aa3ad;--line:#2d3339;--accent:#5b9dff;--ok:#4ade80;--warn:#fbbf24;--err:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:620px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:20px;margin:0 0 2px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 12px;font-weight:600}
+.row{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+.row:last-child{border-bottom:0}
+.row span:first-child{color:var(--muted)}
+.row span:last-child{text-align:right;word-break:break-all;font-variant-numeric:tabular-nums}
+label{display:block;font-size:13px;color:var(--muted);margin:14px 0 4px}
+.field:first-child label{margin-top:0}
+input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+button{width:100%;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer;margin-top:18px}
+button:disabled{opacity:.5;cursor:default}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500;margin-top:8px}
+button.danger{background:transparent;color:var(--err);border:1px solid var(--line);font-weight:500;margin-top:8px}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600}
+.pill.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.pill.err{background:color-mix(in srgb,var(--err) 16%,transparent);color:var(--err)}
+.hint{font-size:12px;color:var(--muted);margin-top:5px}
+.msg{padding:10px 12px;border-radius:8px;font-size:14px;margin-bottom:14px;display:none}
+.msg.show{display:block}
+.msg.ok{background:color-mix(in srgb,var(--ok) 14%,transparent);color:var(--ok)}
+.msg.err{background:color-mix(in srgb,var(--err) 14%,transparent);color:var(--err)}
+.scanrow{display:flex;gap:8px;align-items:flex-end}
+.scanrow>div{flex:1;min-width:0}
+.scanrow button{width:auto;margin:0;padding:9px 14px;white-space:nowrap}
+details{margin-top:4px}
+summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PluTO</h1>
+  <p class="sub" id="devid">&nbsp;</p>
+
+  <div class="msg" id="msg"></div>
+
+  <div class="card">
+    <h2>Status</h2>
+    <div class="row"><span>Network</span><span id="st-wifi">&mdash;</span></div>
+    <div class="row"><span>IP address</span><span id="st-ip">&mdash;</span></div>
+    <div class="row"><span>Signal</span><span id="st-rssi">&mdash;</span></div>
+    <div class="row"><span>MQTT broker</span><span id="st-mqtt">&mdash;</span></div>
+    <div class="row"><span>Clock</span><span id="st-ntp">&mdash;</span></div>
+    <div class="row"><span>Uptime</span><span id="st-up">&mdash;</span></div>
+  </div>
+
+  <form id="form">
+    <div class="card">
+      <h2>WiFi network</h2>
+      <div class="field">
+        <div class="scanrow">
+          <div>
+            <label for="ssid">Network name</label>
+            <input id="ssid" name="wifi_ssid" list="nets" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+            <datalist id="nets"></datalist>
+          </div>
+          <button type="button" class="ghost" id="rescan">Scan</button>
+        </div>
+        <div class="hint" id="scanhint">&nbsp;</div>
+      </div>
+      <div class="field">
+        <label for="wpass">Password</label>
+        <input id="wpass" name="wifi_password" type="password" autocomplete="new-password">
+        <div class="hint" id="wpasshint">Leave blank to keep the stored password.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>MQTT broker</h2>
+      <div class="field">
+        <label for="uri">Broker URI</label>
+        <input id="uri" name="mqtt_uri" required>
+        <div class="hint">Format: mqtt://host:port</div>
+      </div>
+      <div class="field">
+        <label for="muser">Username</label>
+        <input id="muser" name="mqtt_username" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="mpass">Password</label>
+        <input id="mpass" name="mqtt_password" type="password" autocomplete="new-password">
+        <div class="hint" id="mpasshint">Leave blank to keep the stored password.</div>
+      </div>
+    </div>
+
+    <details>
+      <summary>Advanced settings</summary>
+      <div class="card">
+        <h2>Clock</h2>
+        <div class="field">
+          <label for="ntp">NTP server</label>
+          <input id="ntp" name="ntp_server">
+          <div class="hint">Hostname of the time server, such as pool.ntp.org</div>
+        </div>
+        <div class="field">
+          <label for="tz">Time zone</label>
+          <input id="tz" name="ntp_timezone">
+          <div class="hint">POSIX time zone string, such as ART3 for Argentina.</div>
+        </div>
+      </div>
+    </details>
+
+    <button type="submit" id="save">Save and restart</button>
+  </form>
+
+  <details>
+    <summary>Administration</summary>
+    <div class="card">
+      <h2>Dashboard access</h2>
+      <div class="field">
+        <label for="apass">New dashboard password</label>
+        <input id="apass" type="password" autocomplete="new-password">
+        <div class="hint">At least 4 characters. The username is <b id="auser">admin</b>.</div>
+      </div>
+      <button type="button" class="ghost" id="setpass">Change password</button>
+      <div class="hint">Only requested over the local network. The setup portal never asks for it.</div>
+    </div>
+    <div class="card">
+      <h2>Device</h2>
+      <button type="button" class="ghost" id="reboot">Restart</button>
+      <button type="button" class="danger" id="reset">Erase configuration</button>
+      <div class="hint">Erasing returns the device to factory state and brings the setup portal back.</div>
+    </div>
+  </details>
+</div>
+
+<script>
+var $ = function (id) { return document.getElementById(id); };
+var portal = false, polling = null;
+
+function msg(text, kind) {
+  var m = $('msg');
+  m.textContent = text;
+  m.className = 'msg show ' + (kind || 'ok');
+}
+
+function pill(text, kind) { return '<span class="pill ' + kind + '">' + text + '</span>'; }
+
+function duration(s) {
+  var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  if (d) return d + 'd ' + h + 'h';
+  if (h) return h + 'h ' + m + 'm';
+  return m + 'm ' + (s % 60) + 's';
+}
+
+function fillOnce(s) {
+  if ($('ssid').dataset.touched) return;
+  $('ssid').value = s.wifi.ssid || '';
+  $('uri').value = s.mqtt.uri || '';
+  $('muser').value = s.mqtt.username || '';
+  $('ntp').value = s.ntp.server || '';
+  $('tz').value = s.ntp.timezone || '';
+  if (!s.wifi.password_set) $('wpasshint').textContent = 'No password stored yet.';
+  if (!s.mqtt.password_set) $('mpasshint').textContent = 'No password stored yet.';
+}
+
+function render(s) {
+  $('devid').textContent = 'Device ' + s.device_id + ' · firmware ' + s.firmware;
+  $('auser').textContent = s.admin_user;
+
+  var w = s.wifi;
+  if (w.connected) {
+    $('st-wifi').innerHTML = pill('connected', 'ok') + ' ' + (w.ssid || '');
+  } else if (w.auth_suspected_bad) {
+    $('st-wifi').innerHTML = pill('password rejected', 'err');
+  } else if (w.state === 'provisioning') {
+    $('st-wifi').innerHTML = pill('not configured', 'warn');
+  } else {
+    $('st-wifi').innerHTML = pill('reconnecting', 'warn') +
+      (w.retries ? ' attempt ' + w.retries : '') +
+      (w.next_retry_sec ? ' · retrying in ' + w.next_retry_sec + 's' : '');
+  }
+
+  $('st-ip').textContent = w.ip || (s.ap.active ? s.ap.ip + ' (portal)' : '—');
+  $('st-rssi').textContent = w.connected ? w.rssi + ' dBm · channel ' + w.channel : '—';
+  $('st-mqtt').innerHTML = s.mqtt.connected ? pill('connected', 'ok') : pill('disconnected', 'warn');
+  $('st-ntp').textContent = s.ntp.synced ? s.ntp.time : 'not synchronized';
+  $('st-up').textContent = duration(s.uptime_sec);
+
+  portal = s.ap.active && !w.connected;
+  fillOnce(s);
+}
+
+function refresh() {
+  return fetch('api/status').then(function (r) { return r.json(); }).then(render).catch(function () {});
+}
+
+function scan() {
+  $('scanhint').textContent = 'Scanning…';
+  var tick = function () {
+    fetch('api/scan').then(function (r) { return r.json(); }).then(function (d) {
+      if (d.scanning) { setTimeout(tick, 1200); return; }
+      var list = $('nets');
+      list.innerHTML = '';
+      d.networks.sort(function (a, b) { return b.rssi - a.rssi; }).forEach(function (n) {
+        var o = document.createElement('option');
+        o.value = n.ssid;
+        o.label = n.rssi + ' dBm' + (n.secure ? '' : ' · open');
+        list.appendChild(o);
+      });
+      $('scanhint').textContent = d.networks.length
+        ? d.networks.length + ' networks found. Tap the field to choose one.'
+        : 'No networks found.';
+    }).catch(function () { $('scanhint').textContent = 'Scan failed.'; });
+  };
+  tick();
+}
+
+function countdown(ms, note) {
+  clearInterval(polling);
+  var left = Math.ceil(ms / 1000) + 4;
+  msg(note + ' Restarting… ' + left + 's', 'ok');
+  var t = setInterval(function () {
+    left--;
+    if (left > 0) { msg(note + ' Restarting… ' + left + 's', 'ok'); return; }
+    clearInterval(t);
+    msg('Waiting for the device to come back…', 'ok');
+    var probe = setInterval(function () {
+      fetch('api/status', { cache: 'no-store' }).then(function () {
+        clearInterval(probe);
+        location.reload();
+      }).catch(function () {});
+    }, 2000);
+  }, 1000);
+}
+
+$('form').addEventListener('submit', function (e) {
+  e.preventDefault();
+  var body = {};
+  new FormData(e.target).forEach(function (v, k) { if (v) body[k] = v; });
+
+  $('save').disabled = true;
+  fetch('api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function (r) {
+    return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+  }).then(function (res) {
+    if (!res.ok) throw new Error((res.d && res.d.message) || 'Error');
+    countdown(res.d.restart_ms, portal
+      ? 'Configuration saved. The device will join the network, so reconnect this phone to your usual WiFi.'
+      : 'Configuration saved.');
+  }).catch(function (err) {
+    msg('Could not save: ' + err.message, 'err');
+    $('save').disabled = false;
+  });
+});
+
+$('ssid').addEventListener('input', function () { this.dataset.touched = '1'; });
+$('rescan').addEventListener('click', scan);
+
+$('setpass').addEventListener('click', function () {
+  var p = $('apass').value;
+  if (p.length < 4) { msg('The password must be at least 4 characters.', 'err'); return; }
+  fetch('api/admin-pass', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: p })
+  }).then(function (r) {
+    if (!r.ok) throw new Error();
+    $('apass').value = '';
+    msg('Dashboard password updated.', 'ok');
+  }).catch(function () { msg('Could not change the password.', 'err'); });
+});
+
+$('reboot').addEventListener('click', function () {
+  if (!confirm('Restart the device?')) return;
+  fetch('api/reboot', { method: 'POST' }).then(function (r) { return r.json(); })
+    .then(function (d) { countdown(d.restart_ms, 'Restart requested.'); });
+});
+
+$('reset').addEventListener('click', function () {
+  if (!confirm('Erase all configuration? The device will bring the setup portal back.')) return;
+  fetch('api/factory-reset', { method: 'POST' }).then(function (r) { return r.json(); })
+    .then(function (d) { countdown(d.restart_ms, 'Configuration erased.'); });
+});
+
+refresh().then(function () { if (portal) scan(); });
+polling = setInterval(refresh, 4000);
+</script>
+</body>
+</html>

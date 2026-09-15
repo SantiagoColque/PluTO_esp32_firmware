@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "config_store.h"
 #include "esp_log.h"
 #include "esp_sntp.h"
 #include "freertos/FreeRTOS.h"
@@ -15,9 +16,14 @@
 
 static const char *TAG = "sntp_manager";
 static bool s_time_synced;
+static bool s_started;
 
 esp_err_t sntp_manager_init(void)
 {
+    /* esp_sntp_setservername() stores the pointer it is handed instead of
+     * copying the string, so the server name has to come from the store's
+     * long-lived cache rather than from a stack copy of the configuration. */
+    const pluto_config_t *cfg = config_store_peek();
     time_t now = 0;
     struct tm timeinfo = {0};
     int retry = 0;
@@ -26,13 +32,16 @@ esp_err_t sntp_manager_init(void)
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "Configuring SNTP server: %s", CONFIG_NTP_SERVER);
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, CONFIG_NTP_SERVER);
-    esp_sntp_init();
+    if (!s_started) {
+        ESP_LOGI(TAG, "Configuring SNTP server: %s", cfg->ntp_server);
+        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+        esp_sntp_setservername(0, cfg->ntp_server);
+        esp_sntp_init();
+        s_started = true;
 
-    setenv("TZ", CONFIG_NTP_TIMEZONE, 1);
-    tzset();
+        setenv("TZ", cfg->ntp_timezone, 1);
+        tzset();
+    }
 
     time(&now);
     localtime_r(&now, &timeinfo);
@@ -49,7 +58,9 @@ esp_err_t sntp_manager_init(void)
     }
 
     if (timeinfo.tm_year < (SNTP_VALID_YEAR - 1900)) {
-        ESP_LOGE(TAG, "Time synchronization timed out");
+        /* The poller stays running, so the clock can still settle later; the
+         * caller must treat this as a warning rather than a fatal error. */
+        ESP_LOGW(TAG, "Time synchronization timed out; continuing without a valid clock");
         return ESP_ERR_TIMEOUT;
     }
 
@@ -63,4 +74,22 @@ esp_err_t sntp_manager_init(void)
              timeinfo.tm_sec);
 
     return ESP_OK;
+}
+
+bool sntp_manager_is_synced(void)
+{
+    time_t now = 0;
+    struct tm timeinfo = {0};
+
+    if (s_time_synced) {
+        return true;
+    }
+
+    /* The poller keeps running after a timeout, so re-check instead of
+     * reporting the state as of the last call. */
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    s_time_synced = timeinfo.tm_year >= (SNTP_VALID_YEAR - 1900);
+
+    return s_time_synced;
 }
