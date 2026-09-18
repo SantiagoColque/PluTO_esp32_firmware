@@ -1,31 +1,38 @@
 menu "PluTO Firmware Configuration"
 
+    comment "Runtime configuration lives in NVS and is edited from the web dashboard."
+    comment "The values below only seed NVS on the first boot after an erase."
+
     config WIFI_SSID
-        string "WiFi SSID"
+        string "WiFi SSID (first-boot seed)"
         default ""
         help
-            SSID of the WiFi network the device will join.
+            SSID written to NVS on the first boot of a blank device. Leave it
+            empty to make the device start the SoftAP provisioning portal
+            instead, which is the intended flow for a real deployment. Setting
+            it is a development shortcut: flash and the device joins directly.
 
     config WIFI_PASSWORD
-        string "WiFi password"
+        string "WiFi password (first-boot seed)"
         default ""
         help
-            Password of the WiFi network the device will join.
+            Password paired with WIFI_SSID. Only used to seed NVS.
 
     config MQTT_BROKER_URI
-        string "MQTT broker URI"
+        string "MQTT broker URI (first-boot seed)"
         default "mqtt://192.168.1.3:1883"
         help
             URI of the Mosquitto broker, for example mqtt://192.168.1.3:1883.
+            Editable afterwards from the dashboard.
 
     config MQTT_BROKER_USERNAME
-        string "MQTT broker username"
+        string "MQTT broker username (first-boot seed)"
         default ""
         help
             Username used to authenticate against the MQTT broker.
 
     config MQTT_BROKER_PASSWORD
-        string "MQTT broker password"
+        string "MQTT broker password (first-boot seed)"
         default ""
         help
             Password used to authenticate against the MQTT broker.
@@ -34,18 +41,64 @@ menu "PluTO Firmware Configuration"
         string "MQTT device registration topic"
         default "device/subscription"
         help
-            Generic topic where the device publishes its user_id to request a control subscription.
+            Generic topic where the device publishes its device_id to request a
+            control subscription. This is part of the backend contract, not site
+            configuration, so it stays a compile-time constant and is not
+            exposed on the dashboard.
 
     config NTP_SERVER
-        string "NTP server"
+        string "NTP server (first-boot seed)"
         default "pool.ntp.org"
         help
             Hostname of the NTP server used to synchronize the ESP32 clock.
 
     config NTP_TIMEZONE
-        string "Local timezone"
+        string "Local timezone (first-boot seed)"
         default "UTC0"
         help
             POSIX timezone string applied after the clock is synchronized.
+
+    config PLUTO_FORCE_KCONFIG_SEED
+        bool "Re-seed NVS from these values on every boot"
+        default n
+        help
+            Without this, the values above are ignored once NVS holds a
+            configuration, which is surprising during development ("I changed
+            the SSID in menuconfig and nothing happened"). Enable it to make
+            menuconfig authoritative on every boot. Never enable it in a build
+            that ships.
+
+    config WIFI_RECONNECT_MAX_BACKOFF_SEC
+        int "Maximum WiFi reconnect backoff (seconds)"
+        default 30
+        range 5 55
+        help
+            The reconnect delay doubles from 1 s up to this ceiling and stays
+            there. SRS RNF-06.1 requires reconnection within 60 s, and the worst
+            case is this ceiling plus the time to associate and get a DHCP
+            lease, so values above roughly 45 leave no margin.
+
+    config WIFI_AP_FALLBACK_SEC
+        int "Seconds without an IP before raising the provisioning AP"
+        default 45
+        range 15 600
+        help
+            A provisioned device that cannot reach its network raises the SoftAP
+            after this long so it can be reconfigured without reflashing, while
+            still retrying the saved network in the background. Too short and
+            every router reboot raises the portal.
+
+    config PLUTO_AP_SSID_PREFIX
+        string "SoftAP SSID prefix"
+        default "PluTO-"
+        help
+            The device id (last 6 hex digits of the MAC) is appended, giving an
+            SSID such as PluTO-a1b2c3.
+
+    config PLUTO_ADMIN_USER
+        string "Dashboard username"
+        default "admin"
+        help
+            Username for the dashboard's HTTP Basic Auth prompt.
 
 endmenu

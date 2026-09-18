@@ -1,0 +1,13 @@
+# PluTO partition table.
+#
+# Sized for a 2 MB flash so it is valid on any ESP32 module with 2 MB or more.
+# The stock partitions_singleapp.csv caps the app at 1 MB, which the captive
+# portal build does not fit into comfortably.
+#
+# nvs keeps the stock offset and size on purpose: stored configuration survives
+# a change of partition table.
+#
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x6000,
+phy_init,   data, phy,     0xf000,   0x1000,
+factory,    app,  factory, 0x10000,  0x1F0000,

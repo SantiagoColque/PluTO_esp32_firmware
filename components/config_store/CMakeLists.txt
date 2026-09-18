@@ -1,0 +1,4 @@
+idf_component_register(SRCS "config_store.c"
+                       INCLUDE_DIRS "include"
+                       REQUIRES nvs_flash
+                       PRIV_REQUIRES esp_wifi esp_hw_support)
