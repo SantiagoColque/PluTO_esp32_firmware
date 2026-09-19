@@ -46,6 +46,16 @@ menu "PluTO Firmware Configuration"
             configuration, so it stays a compile-time constant and is not
             exposed on the dashboard.
 
+    config PLUTO_EXPIRED_POINT_TOLERANCE_MS
+        int "Tolerance before a trajectory point counts as expired (ms)"
+        default 500
+        range 0 10000
+        help
+            A point whose target instant passed by more than this is dropped
+            instead of being executed late (coordinates-dto.md §6.3). It depends
+            on how fast the motors reach a new position, so revisit it once the
+            servo driver exists.
+
     config NTP_SERVER
         string "NTP server (first-boot seed)"
         default "pool.ntp.org"
