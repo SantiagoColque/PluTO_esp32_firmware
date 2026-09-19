@@ -27,6 +27,10 @@ static const char *TAG = "pluto_main";
 static rotor_t s_rotor;
 static SemaphoreHandle_t s_rotor_lock;
 
+/* The mode in the last state published, so a change of mode (the end of a
+ * pass, for one) is reported right away and only once. */
+static rotor_mode_t s_reported_mode = ROTOR_MODE_IDLE;
+
 static int64_t now_ms(void)
 {
     struct timeval tv;
@@ -42,6 +46,7 @@ static void publish_state(void)
 
     xSemaphoreTake(s_rotor_lock, portMAX_DELAY);
     len = rotor_state_json(&s_rotor, now_ms(), sntp_manager_is_synced(), json, sizeof(json));
+    s_reported_mode = s_rotor.mode;
     xSemaphoreGive(s_rotor_lock);
 
     if (len < 0) {
@@ -96,12 +101,14 @@ static void rotor_task(void *arg)
         pan_tilt_pose_t pose;
         rotor_mode_t mode;
         bool moved;
+        bool mode_unreported;
         TickType_t period;
 
         xSemaphoreTake(s_rotor_lock, portMAX_DELAY);
         moved = rotor_tick(&s_rotor, now_ms());
         pose = s_rotor.pose;
         mode = s_rotor.mode;
+        mode_unreported = mode != s_reported_mode;
         xSemaphoreGive(s_rotor_lock);
 
         if (moved) {
@@ -115,7 +122,7 @@ static void rotor_task(void *arg)
         }
 
         period = pdMS_TO_TICKS(mode == ROTOR_MODE_TRACKING ? STATE_PERIOD_TRACKING_MS : STATE_PERIOD_IDLE_MS);
-        if (xTaskGetTickCount() - last_state >= period) {
+        if (mode_unreported || xTaskGetTickCount() - last_state >= period) {
             publish_state();
             last_state = xTaskGetTickCount();
         }
