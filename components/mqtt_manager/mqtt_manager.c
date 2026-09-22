@@ -13,7 +13,14 @@
 #define CONFIG_MQTT_TOPIC_SUBSCRIPTION "device/subscription"
 #endif
 
-#define MQTT_CONTROL_TOPIC_LEN 64
+#define MQTT_TOPIC_LEN 64
+
+/* The broker publishes the last will after 1.5 keepalives without traffic, so
+ * this is what bounds how long a dead board still looks online. */
+#define MQTT_KEEPALIVE_SEC 15
+
+#define STATUS_ONLINE "online"
+#define STATUS_OFFLINE "offline"
 
 static const char *TAG = "mqtt_manager";
 
@@ -21,6 +28,9 @@ static esp_mqtt_client_handle_t s_client;
 static mqtt_data_cb_t s_data_cb;
 static bool s_mqtt_connected;
 static char s_device_id[WIFI_DEVICE_ID_LEN];
+static char s_coordinates_topic[MQTT_TOPIC_LEN];
+static char s_status_topic[MQTT_TOPIC_LEN];
+static char s_state_topic[MQTT_TOPIC_LEN];
 
 static void mqtt_event_handler(void *handler_args,
                                esp_event_base_t base,
@@ -35,12 +45,15 @@ static void mqtt_event_handler(void *handler_args,
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
     {
-        char control_topic[MQTT_CONTROL_TOPIC_LEN];
         int registration_msg_id;
         int subscribe_msg_id;
 
         s_mqtt_connected = true;
         ESP_LOGI(TAG, "Connected to broker: %s", config_store_peek()->mqtt_uri);
+
+        /* Retained, so whoever subscribes later sees it; the last will
+         * replaces it with "offline" if the board drops. */
+        esp_mqtt_client_publish(s_client, s_status_topic, STATUS_ONLINE, 0, 1, 1);
 
         registration_msg_id = esp_mqtt_client_publish(s_client,
                                                       CONFIG_MQTT_TOPIC_SUBSCRIPTION,
@@ -54,12 +67,8 @@ static void mqtt_event_handler(void *handler_args,
                  s_device_id,
                  registration_msg_id);
 
-        snprintf(control_topic,
-                 sizeof(control_topic),
-                 "control/%s/coordinates",
-                 s_device_id);
-        subscribe_msg_id = esp_mqtt_client_subscribe(s_client, control_topic, 1);
-        ESP_LOGI(TAG, "Subscribed to: %s (msg_id=%d)", control_topic, subscribe_msg_id);
+        subscribe_msg_id = esp_mqtt_client_subscribe(s_client, s_coordinates_topic, 1);
+        ESP_LOGI(TAG, "Subscribed to: %s (msg_id=%d)", s_coordinates_topic, subscribe_msg_id);
         break;
     }
 
@@ -69,6 +78,13 @@ static void mqtt_event_handler(void *handler_args,
         break;
 
     case MQTT_EVENT_DATA:
+        /* A message bigger than the client buffer arrives split over several
+         * events. No valid payload comes close (147 bytes at most), so one
+         * that arrives split is dropped instead of being decoded in pieces. */
+        if (event->current_data_offset != 0 || event->data_len != event->total_data_len) {
+            ESP_LOGW(TAG, "Dropping a fragmented message (%d bytes)", event->total_data_len);
+            break;
+        }
         ESP_LOGI(TAG, "Message received on %.*s", event->topic_len, event->topic);
         if (s_data_cb != NULL) {
             s_data_cb(event->topic, event->topic_len, event->data, event->data_len);
@@ -120,11 +136,22 @@ esp_err_t mqtt_manager_init(mqtt_data_cb_t data_cb, const char *device_id)
 
     s_data_cb = data_cb;
     strlcpy(s_device_id, device_id, sizeof(s_device_id));
+    snprintf(s_coordinates_topic, sizeof(s_coordinates_topic), "device/%s/coordinates/polar", s_device_id);
+    snprintf(s_status_topic, sizeof(s_status_topic), "device/%s/status", s_device_id);
+    snprintf(s_state_topic, sizeof(s_state_topic), "device/%s/state", s_device_id);
 
     const esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = cfg->mqtt_uri,
         .credentials.username = cfg->mqtt_username,
         .credentials.authentication.password = cfg->mqtt_password,
+        .session.keepalive = MQTT_KEEPALIVE_SEC,
+        .session.last_will = {
+            .topic = s_status_topic,
+            .msg = STATUS_OFFLINE,
+            .msg_len = sizeof(STATUS_OFFLINE) - 1,
+            .qos = 1,
+            .retain = 1,
+        },
     };
 
     s_client = esp_mqtt_client_init(&mqtt_cfg);
@@ -143,4 +170,12 @@ esp_err_t mqtt_manager_init(mqtt_data_cb_t data_cb, const char *device_id)
 bool mqtt_manager_is_connected(void)
 {
     return s_mqtt_connected;
+}
+
+esp_err_t mqtt_manager_publish_state(const char *json, int json_len)
+{
+    if (s_client == NULL || !s_mqtt_connected) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return esp_mqtt_client_publish(s_client, s_state_topic, json, json_len, 0, 0) < 0 ? ESP_FAIL : ESP_OK;
 }
