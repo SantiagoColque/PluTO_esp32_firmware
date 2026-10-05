@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PluTO logs</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c1f23;--muted:#6b7280;--line:#e3e6ea;--accent:#2563eb;--ok:#15803d;--warn:#b45309;--err:#b91c1c}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--card:#1d2125;--fg:#e8eaed;--muted:#9aa3ad;--line:#2d3339;--accent:#5b9dff;--ok:#4ade80;--warn:#fbbf24;--err:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:20px;margin:0 0 2px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:13px;margin:0 0 16px}
+.sub a{color:var(--accent)}
+.bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.bar button{padding:8px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);font:inherit;font-weight:600;cursor:pointer}
+.bar button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.state{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.state.err{color:var(--err)}
+.dropped{font-size:12px;color:var(--warn)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.log{list-style:none;margin:0;padding:0;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.log li{display:grid;grid-template-columns:5.5em 1.2em 9.5em 1fr;gap:10px;padding:6px 14px;border-bottom:1px solid var(--line);align-items:baseline}
+.log li:last-child{border-bottom:0}
+.t{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.lvl{font-weight:700;color:var(--muted)}
+.tag{color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.msg{white-space:pre-wrap;word-break:break-word;min-width:0}
+.log li.W .lvl,.log li.W .msg{color:var(--warn)}
+.log li.E .lvl,.log li.E .msg{color:var(--err)}
+.log li.E{background:color-mix(in srgb,var(--err) 7%,transparent)}
+.empty{padding:18px 14px;color:var(--muted);font-size:14px}
+@media(max-width:560px){
+  .log li{grid-template-columns:auto 1.2em 1fr;gap:4px 8px}
+  .log .msg{grid-column:1/-1}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PluTO logs</h1>
+  <p class="sub"><span id="cap">The newest lines</span> from this firmware's own components. <a href="./">Back to the dashboard</a></p>
+
+  <div class="bar">
+    <button type="button" id="toggle">Pause</button>
+    <span class="state" id="state">Loading…</span>
+    <span class="dropped" id="dropped" hidden></span>
+  </div>
+
+  <div class="card">
+    <ul class="log" id="log"></ul>
+    <p class="empty" id="empty" hidden>No lines yet. They appear here as the board logs them.</p>
+  </div>
+</div>
+<script>
+var POLL_MS = 2000;
+var paused = false;
+var inFlight = false;
+var logEl = document.getElementById('log');
+var emptyEl = document.getElementById('empty');
+var stateEl = document.getElementById('state');
+var droppedEl = document.getElementById('dropped');
+var toggleEl = document.getElementById('toggle');
+
+/* The board stamps lines in milliseconds since boot, as the serial monitor shows them. */
+function seconds(ms) {
+  return (ms / 1000).toFixed(3);
+}
+
+function cell(cls, text) {
+  var span = document.createElement('span');
+  span.className = cls;
+  span.textContent = text;
+  return span;
+}
+
+function render(data) {
+  var frag = document.createDocumentFragment();
+
+  data.lines.forEach(function (line) {
+    var li = document.createElement('li');
+    li.className = line.lvl;
+    li.appendChild(cell('t', seconds(line.t)));
+    li.appendChild(cell('lvl', line.lvl));
+    li.appendChild(cell('tag', line.tag));
+    li.appendChild(cell('msg', line.msg));
+    frag.appendChild(li);
+  });
+
+  logEl.replaceChildren(frag);
+  emptyEl.hidden = data.lines.length > 0;
+  document.getElementById('cap').textContent = 'The newest ' + data.capacity + ' lines';
+
+  droppedEl.hidden = data.dropped === 0;
+  droppedEl.textContent = data.dropped + ' skipped while the buffer was busy';
+
+  stateEl.className = 'state';
+  stateEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+function refresh() {
+  if (paused || inFlight || document.hidden) {
+    return;
+  }
+  inFlight = true;
+  fetch('api/logs', { cache: 'no-store' })
+    .then(function (r) {
+      if (!r.ok) { throw new Error('HTTP ' + r.status); }
+      return r.json();
+    })
+    .then(render)
+    .catch(function () {
+      stateEl.className = 'state err';
+      stateEl.textContent = 'Board not reachable; showing the last lines received';
+    })
+    .then(function () { inFlight = false; });
+}
+
+toggleEl.addEventListener('click', function () {
+  paused = !paused;
+  toggleEl.textContent = paused ? 'Resume' : 'Pause';
+  if (paused) {
+    stateEl.className = 'state';
+    stateEl.textContent = 'Paused';
+  } else {
+    refresh();
+  }
+});
+
+/* Catch up straight away when the tab comes back instead of waiting a period. */
+document.addEventListener('visibilitychange', refresh);
+
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>

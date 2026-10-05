@@ -10,6 +10,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_check.h"
+#include "log_ring.h"
 #include "mqtt_manager.h"
 #include "sdkconfig.h"
 #include "sntp_manager.h"
@@ -335,6 +336,72 @@ static esp_err_t factory_reset_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ------------------------------------------------------------------ logs -- */
+
+static esp_err_t logs_api_get_handler(httpd_req_t *req)
+{
+    log_ring_entry_t *lines;
+    size_t count = 0;
+    esp_err_t err;
+    cJSON *root;
+    cJSON *array;
+    char *body;
+
+    if (web_require_auth(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    /* Allocated before taking the ring, so the ring is held only for a copy and
+     * lines logged meanwhile by other tasks are not skipped. A few KB is also
+     * more than this handler should put on the httpd stack. */
+    lines = malloc(LOG_RING_CAPACITY * sizeof(*lines));
+    if (lines == NULL) {
+        return web_send_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    }
+
+    err = log_ring_snapshot(lines, LOG_RING_CAPACITY, &count);
+    if (err != ESP_OK) {
+        free(lines);
+        return web_send_error(req,
+                              HTTPD_500_INTERNAL_SERVER_ERROR,
+                              err == ESP_ERR_TIMEOUT ? "Log ring busy, try again" : "Log capture is not running");
+    }
+
+    root = cJSON_CreateObject();
+    if (root == NULL) {
+        free(lines);
+        return web_send_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    }
+
+    cJSON_AddNumberToObject(root, "capacity", LOG_RING_CAPACITY);
+    cJSON_AddNumberToObject(root, "dropped", log_ring_dropped());
+    array = cJSON_AddArrayToObject(root, "lines");
+
+    for (size_t i = 0; i < count; i++) {
+        cJSON *line = cJSON_CreateObject();
+        const char level[2] = {lines[i].level, '\0'};
+
+        cJSON_AddStringToObject(line, "lvl", level);
+        cJSON_AddNumberToObject(line, "t", lines[i].t_ms);
+        cJSON_AddStringToObject(line, "tag", lines[i].tag);
+        cJSON_AddStringToObject(line, "msg", lines[i].msg);
+        cJSON_AddItemToArray(array, line);
+    }
+    free(lines);
+
+    body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (body == NULL) {
+        return web_send_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    }
+
+    web_send_json(req, body);
+    free(body);
+
+    return ESP_OK;
+}
+
 /* -------------------------------------------------------------- registry -- */
 
 esp_err_t web_register_api_handlers(httpd_handle_t server)
@@ -346,6 +413,7 @@ esp_err_t web_register_api_handlers(httpd_handle_t server)
         {.uri = "/api/admin-pass", .method = HTTP_POST, .handler = admin_pass_post_handler},
         {.uri = "/api/reboot", .method = HTTP_POST, .handler = reboot_post_handler},
         {.uri = "/api/factory-reset", .method = HTTP_POST, .handler = factory_reset_post_handler},
+        {.uri = "/api/logs", .method = HTTP_GET, .handler = logs_api_get_handler},
     };
 
     for (size_t i = 0; i < sizeof(handlers) / sizeof(handlers[0]); i++) {

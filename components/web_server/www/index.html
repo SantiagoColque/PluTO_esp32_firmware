@@ -18,6 +18,7 @@ h1{font-size:20px;margin:0 0 2px;letter-spacing:-.01em}
 .row:last-child{border-bottom:0}
 .row span:first-child{color:var(--muted)}
 .row span:last-child{text-align:right;word-break:break-all;font-variant-numeric:tabular-nums}
+.row a{color:var(--accent)}
 label{display:block;font-size:13px;color:var(--muted);margin:14px 0 4px}
 .field:first-child label{margin-top:0}
 input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit}
@@ -57,6 +58,7 @@ summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0}
     <div class="row"><span>MQTT broker</span><span id="st-mqtt">&mdash;</span></div>
     <div class="row"><span>Clock</span><span id="st-ntp">&mdash;</span></div>
     <div class="row"><span>Uptime</span><span id="st-up">&mdash;</span></div>
+    <div class="row"><span>Logs</span><span><a href="logs">View recent lines</a></span></div>
   </div>
 
   <form id="form">
