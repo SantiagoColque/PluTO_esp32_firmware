@@ -194,6 +194,35 @@ static void test_hold_stops_even_without_a_clock(void)
     CHECK(rotor.pose.pan_cdeg == 4750 && rotor.pose.tilt_cdeg == 1500);
 }
 
+static void test_the_mount_decides_what_is_reachable(void)
+{
+    /* What start_rotor hands in from a stored calibration: a mount facing east
+     * whose tilt cannot lean past the zenith. */
+    pan_tilt_config_t mount = {.az_ref_cdeg = 9000,
+                               .pan_min_cdeg = 0,
+                               .pan_max_cdeg = 18000,
+                               .tilt_min_cdeg = 0,
+                               .tilt_max_cdeg = 9000};
+    const point_spec_t south_east[] = {{0, 13500, 2000}};
+    const point_spec_t north_east[] = {{0, 4500, 3000}};
+    rotor_t rotor;
+    uint8_t buf[64];
+    size_t len;
+
+    rotor_init(&rotor, &mount, TOLERANCE_MS);
+
+    len = pack(buf, 0, T0, T0 - 100, south_east, 1);
+    CHECK(rotor_handle_payload(&rotor, buf, len, T0 - 50, true));
+    CHECK(rotor.pose.mode == PAN_TILT_NORMAL && rotor.pose.pan_cdeg == 4500 && rotor.pose.tilt_cdeg == 2000);
+
+    /* Behind the mount it would take the flipped mode, which the tilt limit
+     * rules out, although the default mount reaches it. */
+    len = pack(buf, 0, T0, T0 - 100, north_east, 1);
+    CHECK(!rotor_handle_payload(&rotor, buf, len, T0 - 50, true));
+    CHECK(rotor.last_batch.error != NULL && strcmp(rotor.last_batch.error, "unreachable") == 0);
+    CHECK(rotor.pose.pan_cdeg == 4500 && rotor.pose.tilt_cdeg == 2000); /* did not move */
+}
+
 static void test_the_json_refuses_a_short_buffer(void)
 {
     rotor_t rotor;
@@ -228,6 +257,7 @@ int main(void)
     test_the_time_based_rejections();
     test_a_rejected_batch_keeps_the_current_trajectory();
     test_hold_stops_even_without_a_clock();
+    test_the_mount_decides_what_is_reachable();
     test_the_json_refuses_a_short_buffer();
     test_the_longest_state_fits();
 
