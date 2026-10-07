@@ -209,9 +209,9 @@ static void rotor_task(void *arg)
 
 static void start_rotor(void)
 {
-    /* Mount facing north with both servos on their full range until the
-     * calibration (az_ref and limits) is stored in config_store. */
-    const pan_tilt_config_t mount = PAN_TILT_CONFIG_DEFAULT;
+    pan_tilt_config_t mount = PAN_TILT_CONFIG_DEFAULT;
+    const char *source = "default";
+    pluto_calibration_t cal;
     /* Pins and pulses from Kconfig until they are stored in NVS too. */
     const servo_driver_config_t servos = {
         .pan = {
@@ -223,6 +223,43 @@ static void start_rotor(void)
             .calibration = {CONFIG_PLUTO_SERVO_TILT_US_AT_0, CONFIG_PLUTO_SERVO_TILT_US_AT_180},
         },
     };
+
+    /* The stored calibration comes from outside the image, so it is checked
+     * before the rotor gets it: a limit past 0..18000 asks for angles a
+     * 180-degree servo cannot reach, and an empty range rejects every batch.
+     * Either way the default mount is the better guess. */
+    if (config_store_get_calibration(&cal) == ESP_OK) {
+        const pan_tilt_config_t stored = {
+            .az_ref_cdeg = cal.az_ref_cdeg,
+            .pan_min_cdeg = cal.pan_min_cdeg,
+            .pan_max_cdeg = cal.pan_max_cdeg,
+            .tilt_min_cdeg = cal.tilt_min_cdeg,
+            .tilt_max_cdeg = cal.tilt_max_cdeg,
+        };
+
+        if (pan_tilt_config_valid(&stored)) {
+            mount = stored;
+            source = "calibration";
+        } else {
+            ESP_LOGW(TAG, "Stored calibration is out of range (az_ref=%ld pan=%ld..%ld tilt=%ld..%ld); "
+                          "using the default mount",
+                     (long)stored.az_ref_cdeg,
+                     (long)stored.pan_min_cdeg,
+                     (long)stored.pan_max_cdeg,
+                     (long)stored.tilt_min_cdeg,
+                     (long)stored.tilt_max_cdeg);
+        }
+    } else {
+        ESP_LOGW(TAG, "No calibration available; using the default mount");
+    }
+
+    ESP_LOGI(TAG, "Mount (%s): az_ref=%ld pan=%ld..%ld tilt=%ld..%ld cdeg",
+             source,
+             (long)mount.az_ref_cdeg,
+             (long)mount.pan_min_cdeg,
+             (long)mount.pan_max_cdeg,
+             (long)mount.tilt_min_cdeg,
+             (long)mount.tilt_max_cdeg);
 
     /* Not worth a reboot loop: a bad pin or calibration needs a reflash
      * either way, and meanwhile the board keeps following and reporting the
