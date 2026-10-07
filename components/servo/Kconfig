@@ -1,0 +1,93 @@
+menu "PluTO servos"
+
+    comment "main reads these at boot and hands them to the servo driver."
+    comment "They are not stored in NVS: changing one means reflashing."
+
+    choice PLUTO_SERVO_DS3218_VERSION
+        prompt "DS3218 version"
+        default PLUTO_SERVO_DS3218_270
+        help
+            The DS3218 comes in a 180-degree and a 270-degree version. Both
+            take 500-2500 us but spread it over different angles, so the
+            version sets the default pulses below. The mount uses 180 degrees
+            of either.
+
+            The 270-degree version is the default on purpose. Set to 180 while
+            the servo is a 270, it would turn 90 degrees further than asked and
+            stretch the cable loops. Set to 270 while the servo is a 180, it
+            only falls about 60 degrees short.
+
+            To tell them apart on the bench, send 1000 us and then 2000 us:
+            the horn turns about 90 degrees on the 180-degree version and about
+            135 on the 270-degree one.
+
+            Changing the version once sdkconfig exists does not change the
+            pulses already saved in it: they count as set by hand. Set the
+            four pulses again, or delete their lines from sdkconfig and run
+            idf.py reconfigure to get the new version's defaults.
+
+        config PLUTO_SERVO_DS3218_180
+            bool "180 degrees"
+
+        config PLUTO_SERVO_DS3218_270
+            bool "270 degrees"
+    endchoice
+
+    config PLUTO_SERVO_PAN_GPIO
+        int "Pan servo signal GPIO"
+        range 0 33
+        default 25
+        help
+            The driver refuses the pins that are unsafe for a servo signal:
+            the strapping pins 0, 2, 5, 12 and 15, the flash on 6-11, UART0 on
+            1 and 3, and 14, which puts out PWM during boot. 34-39 are inputs
+            only. Keep 21/22 and 32/33 free as well, for the I2C buses of the
+            encoders.
+
+    config PLUTO_SERVO_TILT_GPIO
+        int "Tilt servo signal GPIO"
+        range 0 33
+        default 26
+        help
+            Same rules as the pan pin, and a different pin from it.
+
+    comment "Two-point calibration: the pulse that puts each servo at 0 and at 180 degrees."
+    comment "It covers trim, scale and direction; reverse a servo by swapping the two."
+
+    config PLUTO_SERVO_PAN_US_AT_0
+        int "Pan pulse at 0 degrees (us)"
+        range 500 2500
+        default 500 if PLUTO_SERVO_DS3218_180
+        default 834
+        help
+            Pulse width that puts the pan servo at 0 degrees. The default is
+            the nominal one for the version above (SERVO_CALIBRATION_DS3218_*
+            in servo_pulse.h). Measure the real one on the bench.
+
+    config PLUTO_SERVO_PAN_US_AT_180
+        int "Pan pulse at 180 degrees (us)"
+        range 500 2500
+        default 2500 if PLUTO_SERVO_DS3218_180
+        default 2166
+        help
+            Pulse width that puts the pan servo at 180 degrees.
+
+    config PLUTO_SERVO_TILT_US_AT_0
+        int "Tilt pulse at 0 degrees (us)"
+        range 500 2500
+        default 500 if PLUTO_SERVO_DS3218_180
+        default 834
+        help
+            Pulse width that puts the tilt servo at 0 degrees, the horizon
+            ahead.
+
+    config PLUTO_SERVO_TILT_US_AT_180
+        int "Tilt pulse at 180 degrees (us)"
+        range 500 2500
+        default 2500 if PLUTO_SERVO_DS3218_180
+        default 2166
+        help
+            Pulse width that puts the tilt servo at 180 degrees, the horizon
+            behind.
+
+endmenu
