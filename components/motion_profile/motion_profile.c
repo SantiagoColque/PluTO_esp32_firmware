@@ -82,6 +82,18 @@ static void advance(motion_profile_t *axis, float target_cdeg, float dt_s)
     }
 }
 
+static void update_rest(motion_profile_t *axis, bool woken, int32_t dt_ms)
+{
+    int32_t left = axis->cfg.rest_after_ms - axis->still_ms;
+
+    if (woken || !motion_profile_settled(axis)) {
+        axis->still_ms = 0;
+    } else if (axis->cfg.rest_after_ms > 0) {
+        /* Capped rather than summed, so a board left alone for weeks cannot
+         * overflow it. */
+        axis->still_ms = dt_ms >= left ? axis->cfg.rest_after_ms : axis->still_ms + dt_ms;
+    }
+}
 
 void motion_profile_init(motion_profile_t *axis, const motion_profile_config_t *cfg)
 {
@@ -95,10 +107,12 @@ void motion_profile_reset(motion_profile_t *axis, int32_t pos_cdeg)
     axis->has_target = false;
     axis->pos_cdeg = (float)pos_cdeg;
     axis->vel_cdeg_s = 0.0f;
+    axis->still_ms = 0;
 }
 
 int32_t motion_profile_step(motion_profile_t *axis, int32_t target_cdeg, int32_t dt_ms)
 {
+    bool woken = !axis->has_target || target_cdeg != axis->target_cdeg;
     int32_t dt = clamp_dt(dt_ms);
 
     axis->has_target = true;
@@ -112,6 +126,7 @@ int32_t motion_profile_step(motion_profile_t *axis, int32_t target_cdeg, int32_t
         advance(axis, (float)target_cdeg, (float)dt / 1000.0f);
     }
 
+    update_rest(axis, woken, dt);
     return motion_profile_position(axis);
 }
 
@@ -135,6 +150,7 @@ int32_t motion_profile_brake(motion_profile_t *axis, int32_t dt_ms)
         }
     }
 
+    update_rest(axis, false, dt);
     return motion_profile_position(axis);
 }
 
@@ -151,4 +167,9 @@ int32_t motion_profile_position(const motion_profile_t *axis)
 bool motion_profile_settled(const motion_profile_t *axis)
 {
     return axis->vel_cdeg_s == 0.0f && (!axis->has_target || axis->pos_cdeg == (float)axis->target_cdeg);
+}
+
+bool motion_profile_resting(const motion_profile_t *axis)
+{
+    return axis->cfg.rest_after_ms > 0 && axis->still_ms >= axis->cfg.rest_after_ms;
 }

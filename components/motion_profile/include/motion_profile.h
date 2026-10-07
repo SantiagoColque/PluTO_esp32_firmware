@@ -5,7 +5,8 @@
 #include <stdint.h>
 
 /*
- * Speed and acceleration limits for one servo axis (HU-36).
+ * Speed and acceleration limits for one servo axis (HU-36), and when that axis
+ * has stood still long enough for its output to be released (HU-35).
  *
  * It works in servo space, in centidegrees, after pan_tilt has chosen the mode.
  * There each axis lives in its own interval with no wraparound, so the 180
@@ -29,6 +30,7 @@
 typedef struct {
     int32_t v_max_cdeg_s;  /* top speed; 0 for no speed limit */
     int32_t a_max_cdeg_s2; /* top acceleration and deceleration; 0 for no limit */
+    int32_t rest_after_ms; /* still this long at the same target to rest; 0 never rests */
 } motion_profile_config_t;
 
 /* With both limits at 0 the axis is commanded the target as is. */
@@ -41,6 +43,7 @@ typedef struct {
     float pos_cdeg;    /* float so a slow axis, a fraction of a centidegree per step, still advances */
     float vel_cdeg_s;
     int32_t target_cdeg;
+    int32_t still_ms; /* time settled at an unchanged target, capped at rest_after_ms */
 } motion_profile_t;
 
 void motion_profile_init(motion_profile_t *axis, const motion_profile_config_t *cfg);
@@ -58,7 +61,8 @@ void motion_profile_reset(motion_profile_t *axis, int32_t pos_cdeg);
  *
  * dt_ms is the time since the previous step or brake. 0 or negative moves
  * nothing, which lets a caller update the target between steps; anything
- * above MOTION_PROFILE_MAX_DT_MS counts as that.
+ * above MOTION_PROFILE_MAX_DT_MS counts as that. A changed target ends a rest
+ * right away, before any movement.
  */
 int32_t motion_profile_step(motion_profile_t *axis, int32_t target_cdeg, int32_t dt_ms);
 
@@ -77,5 +81,11 @@ int32_t motion_profile_position(const motion_profile_t *axis);
 
 /** @brief Stopped, and on the target unless it was braking. */
 bool motion_profile_settled(const motion_profile_t *axis);
+
+/**
+ * @brief Settled at the same target for rest_after_ms: the output can be
+ * released until the target changes.
+ */
+bool motion_profile_resting(const motion_profile_t *axis);
 
 #endif

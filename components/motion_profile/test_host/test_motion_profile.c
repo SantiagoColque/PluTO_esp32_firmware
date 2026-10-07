@@ -17,11 +17,12 @@ static int s_failures;
 #define TICK_MS 50
 #define V_MAX 6000  /* 60 degrees per second */
 #define A_MAX 12000 /* 120 degrees per second squared */
+#define REST_MS 5000
 
 /* Float rounding allowed in a measured speed, in centidegrees per second. */
 #define SPEED_SLACK 1.0f
 
-static const motion_profile_config_t LIMITED = {V_MAX, A_MAX};
+static const motion_profile_config_t LIMITED = {V_MAX, A_MAX, REST_MS};
 
 /*
  * What the servo would see: speeds and accelerations measured from the
@@ -173,7 +174,7 @@ static void test_slow_limits_still_arrive(void)
 {
     /* A fraction of a centidegree per step: whole centidegrees would round
      * every step to nothing and never get there. */
-    const motion_profile_config_t slow = {10, 20};
+    const motion_profile_config_t slow = {10, 20, 0};
     motion_profile_t axis;
     trace_t trace;
 
@@ -284,11 +285,12 @@ static void test_no_limits_follow_the_target_as_is(void)
     CHECK(motion_profile_step(&axis, 9000, -3) == 9000);
     CHECK(motion_profile_settled(&axis));
     CHECK(motion_profile_brake(&axis, 0) == 9000);
+    CHECK(!motion_profile_resting(&axis)); /* rest_after_ms 0: never */
 }
 
 static void test_a_speed_limit_alone_moves_at_constant_speed(void)
 {
-    const motion_profile_config_t speed_only = {V_MAX, 0};
+    const motion_profile_config_t speed_only = {V_MAX, 0, 0};
     motion_profile_t axis;
 
     motion_profile_init(&axis, &speed_only);
@@ -303,7 +305,7 @@ static void test_a_speed_limit_alone_moves_at_constant_speed(void)
 
 static void test_an_acceleration_limit_alone_has_no_top_speed(void)
 {
-    const motion_profile_config_t accel_only = {0, A_MAX};
+    const motion_profile_config_t accel_only = {0, A_MAX, 0};
     motion_profile_t axis;
     trace_t trace;
 
@@ -407,7 +409,7 @@ static void test_a_brake_slows_down_at_the_acceleration_limit(void)
 
 static void test_a_brake_without_an_acceleration_limit_stops_at_once(void)
 {
-    const motion_profile_config_t speed_only = {V_MAX, 0};
+    const motion_profile_config_t speed_only = {V_MAX, 0, 0};
     motion_profile_t axis;
     int32_t before;
 
@@ -420,10 +422,105 @@ static void test_a_brake_without_an_acceleration_limit_stops_at_once(void)
     CHECK(motion_profile_settled(&axis));
 }
 
+static void test_it_rests_after_the_timeout_at_the_same_target(void)
+{
+    motion_profile_t axis;
 
+    motion_profile_init(&axis, &LIMITED);
+    motion_profile_step(&axis, 5000, TICK_MS);
+    CHECK(!motion_profile_resting(&axis));
 
+    for (int i = 0; i < REST_MS / TICK_MS - 1; i++) {
+        motion_profile_step(&axis, 5000, TICK_MS);
+    }
+    CHECK(!motion_profile_resting(&axis));
+    motion_profile_step(&axis, 5000, TICK_MS);
+    CHECK(motion_profile_resting(&axis));
 
+    /* And it stays at rest for as long as nothing changes. */
+    for (int i = 0; i < 1000; i++) {
+        motion_profile_step(&axis, 5000, TICK_MS);
+    }
+    CHECK(motion_profile_resting(&axis));
+    CHECK(motion_profile_position(&axis) == 5000);
+}
 
+static void test_a_new_target_ends_the_rest_at_once(void)
+{
+    motion_profile_t axis;
+
+    motion_profile_init(&axis, &LIMITED);
+    for (int i = 0; i <= REST_MS / TICK_MS; i++) {
+        motion_profile_step(&axis, 5000, TICK_MS);
+    }
+    CHECK(motion_profile_resting(&axis));
+
+    /* Before any time passes, so the outputs are back before the first move. */
+    CHECK(motion_profile_step(&axis, 5100, 0) == 5000);
+    CHECK(!motion_profile_resting(&axis));
+}
+
+static void test_a_moving_axis_does_not_rest(void)
+{
+    const motion_profile_config_t quick_rest = {V_MAX, A_MAX, 1000};
+    motion_profile_t axis;
+    int steps = 0;
+
+    motion_profile_init(&axis, &quick_rest);
+    motion_profile_reset(&axis, 0);
+
+    /* The same target all along, but 3.5 s on the way to it. */
+    do {
+        motion_profile_step(&axis, 18000, TICK_MS);
+        CHECK(!motion_profile_resting(&axis));
+        steps++;
+    } while (!motion_profile_settled(&axis) && steps < 1000);
+    CHECK(steps > 1000 / TICK_MS);
+
+    for (int i = 0; i < 1000 / TICK_MS; i++) {
+        motion_profile_step(&axis, 18000, TICK_MS);
+    }
+    CHECK(motion_profile_resting(&axis));
+}
+
+static void test_an_axis_braked_to_a_stop_rests(void)
+{
+    motion_profile_t axis;
+    trace_t trace;
+
+    motion_profile_init(&axis, &LIMITED);
+    motion_profile_reset(&axis, 0);
+    trace_start(&trace, &axis);
+    move_for(&axis, 18000, 30, &trace);
+
+    for (int i = 0; i < 20; i++) {
+        motion_profile_brake(&axis, TICK_MS);
+    }
+    CHECK(motion_profile_settled(&axis));
+    CHECK(!motion_profile_resting(&axis));
+
+    for (int i = 0; i < REST_MS / TICK_MS; i++) {
+        motion_profile_brake(&axis, TICK_MS);
+    }
+    CHECK(motion_profile_resting(&axis));
+
+    /* Any target after a stop wakes it, even the one it had before. */
+    motion_profile_step(&axis, 18000, 0);
+    CHECK(!motion_profile_resting(&axis));
+}
+
+static void test_a_zero_timeout_never_rests(void)
+{
+    const motion_profile_config_t never = {V_MAX, A_MAX, 0};
+    motion_profile_t axis;
+
+    motion_profile_init(&axis, &never);
+    for (int i = 0; i < 1000; i++) {
+        motion_profile_step(&axis, 5000, TICK_MS);
+    }
+    CHECK(motion_profile_settled(&axis));
+    CHECK(!motion_profile_resting(&axis));
+}
 
 int main(void)
 {
@@ -443,6 +540,11 @@ int main(void)
     test_a_target_moved_back_is_overshot_short_of_the_old_one();
     test_a_brake_slows_down_at_the_acceleration_limit();
     test_a_brake_without_an_acceleration_limit_stops_at_once();
+    test_it_rests_after_the_timeout_at_the_same_target();
+    test_a_new_target_ends_the_rest_at_once();
+    test_a_moving_axis_does_not_rest();
+    test_an_axis_braked_to_a_stop_rests();
+    test_a_zero_timeout_never_rests();
 
     if (s_failures) {
         fprintf(stderr, "motion_profile: %d check(s) failed\n", s_failures);
