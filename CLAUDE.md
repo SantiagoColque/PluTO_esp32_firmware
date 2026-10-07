@@ -226,8 +226,13 @@ seed: they start at 0 and +1 and are set from the dashboard.
     idf.py build
     idf.py -p /dev/ttyUSB0 flash monitor
 
-It needs ESP-IDF v5.5 or later: `log_ring` checks `CONFIG_LOG_VERSION`, which older
-versions lack. Development uses v5.5.2.
+It needs ESP-IDF v5.5.x: `log_ring` checks `CONFIG_LOG_VERSION`, which older versions
+lack, and ESP-IDF 6 no longer ships the `json` and `mqtt` components that `web_server`
+and `mqtt_manager` require. Development uses v5.5.2.
+
+`README.md` is the deployment guide for people: flashing without ESP-IDF (the merged
+image, which also wipes NVS), provisioning, registering with the server, recovery and
+every menuconfig option. Keep it in step when one of those changes.
 
 `sdkconfig` is not committed (`.gitignore` excludes it): each checkout generates its own
 from `sdkconfig.defaults`, which holds the choices that carry a reason:
