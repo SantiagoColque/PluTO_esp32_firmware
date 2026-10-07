@@ -69,3 +69,23 @@ jobs:
             exit 1
           fi
           echo "${#suites[@]} host test suites passed"
+
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: idf.py build (ESP-IDF v5.5.2, esp32)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          # Pinned, never `latest` (the action's default). IDF v6 dropped the
+          # json and mqtt components that web_server and mqtt_manager require,
+          # and log_ring.c stops the build with #error unless the IDF defaults
+          # keep log version 1 and RTOS timestamps, which sdkconfig.defaults
+          # does not pin. A bump goes in its own PR, built here first.
+          esp_idf_version: v5.5.2
+          target: esp32
+          command: idf.py build
