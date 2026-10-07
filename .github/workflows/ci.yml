@@ -1,23 +1,26 @@
 name: ci
 
 # Required status checks match on the job id, so the jobs below keep no `name:`
-# override: a ruleset on develop can require "host-tests" and "build" verbatim.
-# No `paths:` filter either, because a required check that never runs leaves the
-# PR waiting forever.
+# override: a ruleset on develop or main can require "host-tests" and "build"
+# verbatim. No `paths:` filter either, because a required check that never runs
+# leaves the PR waiting forever. For the same reason main is listed next to
+# develop: the release PR from develop into main must run the checks its
+# ruleset requires, and a branch dropped from these lists must not be required.
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, main]
   push:
-    branches: [develop]
+    branches: [develop, main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A new push to a PR supersedes the run in progress. Pushes to develop and
-# manual runs get a group of their own (the run id): sharing one group would
+# A new push to a PR supersedes the run in progress. Pushes to develop or main
+# and manual runs get a group of their own (the run id): sharing one group would
 # still let Actions drop a queued run when a third one arrives, even with
-# cancel-in-progress off, and every commit on develop should keep its verdict.
+# cancel-in-progress off, and every commit on those branches should keep its
+# verdict.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
