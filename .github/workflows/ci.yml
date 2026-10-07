@@ -83,7 +83,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: idf.py build (ESP-IDF v5.5.2, esp32)
+      - name: idf.py build, warnings fail (ESP-IDF v5.5.2, esp32)
         uses: espressif/esp-idf-ci-action@v1
         with:
           # Pinned, never `latest` (the action's default). IDF v6 dropped the
@@ -93,4 +93,20 @@ jobs:
           # does not pin. A bump goes in its own PR, built here first.
           esp_idf_version: v5.5.2
           target: esp32
-          command: idf.py build
+          # IDF builds with -Werror but downgrades unused-function,
+          # unused-variable, unused-but-set-variable, deprecated-declarations
+          # and all of -Wextra back to warnings, so a clean exit still lets them
+          # through. The firmware builds with none, and the log is grepped to
+          # keep it that way; idf.py strips color codes when its output is a
+          # pipe, so the match is plain text.
+          # The action pastes this command inside `bash -c '...'`: a single
+          # quote would end that string early, so only double quotes appear
+          # here. That shell also runs without pipefail, which would let the
+          # exit status of tee hide a failed build.
+          command: >-
+            set -o pipefail &&
+            idf.py build 2>&1 | tee /tmp/build.log &&
+            if grep -n "warning:" /tmp/build.log; then
+            echo "::error::the firmware build emitted compiler warnings";
+            exit 1;
+            fi
