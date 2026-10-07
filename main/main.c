@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <sys/time.h>
 
 #include "esp_err.h"
@@ -10,6 +11,7 @@
 #include "nvs_flash.h"
 
 #include "config_store.h"
+#include "log_ring.h"
 #include "mqtt_manager.h"
 #include "rotor.h"
 #include "sntp_manager.h"
@@ -57,6 +59,66 @@ static void publish_state(void)
     mqtt_manager_publish_state(json, len);
 }
 
+/*
+ * LOCAL DEBUG AID - not meant to ship.
+ *
+ * Centidegrees as signed degrees with two decimals. Written by hand rather than
+ * with %f because splitting the value arithmetically loses the sign for
+ * anything between -1 and 0 degrees, and because CONFIG_LOG_MAXIMUM_LEVEL only
+ * reaches INFO, so this has to survive on integer formatting.
+ */
+static const char *cdeg_str(int32_t cdeg, char *buf, size_t len)
+{
+    /* Widened so negating INT32_MIN cannot overflow, even though the DTO bounds
+     * the real values to +-35999. */
+    int64_t magnitude = cdeg < 0 ? -(int64_t)cdeg : cdeg;
+
+    snprintf(buf, len, "%s%lld.%02lld",
+             cdeg < 0 ? "-" : "",
+             (long long)(magnitude / 100),
+             (long long)(magnitude % 100));
+
+    return buf;
+}
+
+/*
+ * LOCAL DEBUG AID - not meant to ship.
+ *
+ * The accept line says nothing about where the antenna was told to go, which is
+ * the whole point of looking at the monitor. The points printed are the ones
+ * kept after the expiry rule, so a count below the payload's own is the
+ * tolerance at work rather than a decode problem.
+ */
+static void log_batch_points(int payload_len,
+                             const rotor_batch_report_t *report,
+                             const trajectory_t *loaded,
+                             int64_t received_ms)
+{
+    int on_wire = (payload_len - PLUTO_DTO_HEADER_LEN) / PLUTO_DTO_POINT_LEN;
+    /* Sized for the full int32 range, not just the DTO's, so the formatting
+     * above cannot be truncated. */
+    char az[16];
+    char el[16];
+
+    if (report->latency_valid) {
+        ESP_LOGI(TAG, "  %d points on the wire, %u kept, latency %lld ms",
+                 on_wire, (unsigned)loaded->count, (long long)report->latency_ms);
+    } else {
+        ESP_LOGI(TAG, "  %d points on the wire, %u kept, latency unknown (no synced clock)",
+                 on_wire, (unsigned)loaded->count);
+    }
+
+    for (size_t i = 0; i < loaded->count; i++) {
+        const trajectory_point_t *point = &loaded->points[i];
+
+        ESP_LOGI(TAG, "  [%u] t%+lld ms  az=%s el=%s",
+                 (unsigned)i,
+                 (long long)(point->t_ms - received_ms),
+                 cdeg_str(point->az_cdeg, az, sizeof(az)),
+                 cdeg_str(point->el_cdeg, el, sizeof(el)));
+    }
+}
+
 static void coordinates_message_handler(const char *topic,
                                         int topic_len,
                                         const char *payload,
@@ -65,22 +127,34 @@ static void coordinates_message_handler(const char *topic,
     bool accepted;
     const char *error;
     rotor_mode_t mode;
+    rotor_batch_report_t report;
+    trajectory_t loaded;
+    int64_t received_ms;
 
     (void)topic;
     (void)topic_len;
+
+    /* One reading of the clock for both the rotor and the debug dump, so the
+     * offsets printed are relative to the instant the batch was actually
+     * handled. */
+    received_ms = now_ms();
 
     xSemaphoreTake(s_rotor_lock, portMAX_DELAY);
     accepted = rotor_handle_payload(&s_rotor,
                                     (const uint8_t *)payload,
                                     (size_t)payload_len,
-                                    now_ms(),
+                                    received_ms,
                                     sntp_manager_is_synced());
     error = s_rotor.last_batch.error;
     mode = s_rotor.mode;
+    /* Copied out so the dump below prints without holding the rotor task off. */
+    report = s_rotor.last_batch;
+    loaded = s_rotor.trajectory;
     xSemaphoreGive(s_rotor_lock);
 
     if (accepted) {
         ESP_LOGI(TAG, "Batch accepted (%d bytes), mode %s", payload_len, rotor_mode_name(mode));
+        log_batch_points(payload_len, &report, &loaded, received_ms);
     } else {
         ESP_LOGW(TAG, "Batch rejected: %s", error);
     }
@@ -176,6 +250,9 @@ static esp_err_t init_nvs(void)
 void app_main(void)
 {
     char device_id[WIFI_DEVICE_ID_LEN];
+
+    /* First, so the /logs page sees the boot from configuration onwards. */
+    log_ring_install();
 
     ESP_ERROR_CHECK(init_nvs());
     ESP_ERROR_CHECK(config_store_init());

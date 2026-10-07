@@ -26,6 +26,8 @@
 
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
 extern const uint8_t index_html_gz_end[] asm("_binary_index_html_gz_end");
+extern const uint8_t logs_html_gz_start[] asm("_binary_logs_html_gz_start");
+extern const uint8_t logs_html_gz_end[] asm("_binary_logs_html_gz_end");
 
 static const char *TAG = "web_server";
 
@@ -190,7 +192,7 @@ void web_schedule_restart(uint32_t delay_ms)
 
 /* -------------------------------------------------------------- handlers -- */
 
-static esp_err_t root_get_handler(httpd_req_t *req)
+static esp_err_t send_gzipped_page(httpd_req_t *req, const uint8_t *start, const uint8_t *end)
 {
     if (web_require_auth(req) != ESP_OK) {
         return ESP_OK;
@@ -200,9 +202,17 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
-    return httpd_resp_send(req,
-                           (const char *)index_html_gz_start,
-                           index_html_gz_end - index_html_gz_start);
+    return httpd_resp_send(req, (const char *)start, end - start);
+}
+
+static esp_err_t root_get_handler(httpd_req_t *req)
+{
+    return send_gzipped_page(req, index_html_gz_start, index_html_gz_end);
+}
+
+static esp_err_t logs_get_handler(httpd_req_t *req)
+{
+    return send_gzipped_page(req, logs_html_gz_start, logs_html_gz_end);
 }
 
 static esp_err_t captive_404_handler(httpd_req_t *req, httpd_err_code_t err)
@@ -248,6 +258,11 @@ esp_err_t web_server_start(void)
         .method = HTTP_GET,
         .handler = root_get_handler,
     };
+    const httpd_uri_t logs = {
+        .uri = "/logs",
+        .method = HTTP_GET,
+        .handler = logs_get_handler,
+    };
 
     if (s_server != NULL) {
         return ESP_OK;
@@ -255,7 +270,9 @@ esp_err_t web_server_start(void)
 
     config.stack_size = WEB_HTTPD_STACK;
     config.max_open_sockets = WEB_HTTPD_MAX_SOCKETS;
-    config.max_uri_handlers = 10;
+    /* Nine routes today. A route past the limit fails to register at runtime
+     * with nothing but a log line, so keep some room. */
+    config.max_uri_handlers = 12;
     /* Browsers open several parallel connections and keep them alive; without
      * this the server refuses new ones and the page half loads. */
     config.lru_purge_enable = true;
@@ -265,6 +282,7 @@ esp_err_t web_server_start(void)
     ESP_RETURN_ON_ERROR(httpd_start(&s_server, &config), TAG, "Unable to start the HTTP server");
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(s_server, &root));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_uri_handler(s_server, &logs));
     ESP_ERROR_CHECK_WITHOUT_ABORT(web_register_api_handlers(s_server));
     ESP_ERROR_CHECK_WITHOUT_ABORT(httpd_register_err_handler(s_server, HTTPD_404_NOT_FOUND, captive_404_handler));
 
