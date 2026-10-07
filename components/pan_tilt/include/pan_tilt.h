@@ -80,10 +80,23 @@ bool pan_tilt_from_azel(const pan_tilt_config_t *cfg,
 bool pan_tilt_reachable(const pan_tilt_config_t *cfg, int32_t az_cdeg, int32_t el_cdeg);
 
 /**
+ * @brief The mode a pose is physically in, from the side of the zenith its
+ * tilt is on.
+ *
+ * A pose on its way between modes, which is what a speed-limited flip goes
+ * through, carries the label of the mode it is heading to while its tilt can
+ * still be on the other side. On the zenith itself both modes point at the
+ * same place and the label decides.
+ */
+pan_tilt_mode_t pan_tilt_pose_mode(const pan_tilt_pose_t *pose);
+
+/**
  * @brief The geographic az/el a pose points at.
  *
  * The inverse of pan_tilt_from_azel(), used to report the position on the
- * state channel (device-state.md §4).
+ * state channel (device-state.md §4). It goes by pan_tilt_pose_mode() rather
+ * than by the label, so a pose halfway through a flip still reports where it
+ * points and an elevation within ±90 degrees.
  */
 void pan_tilt_to_azel(const pan_tilt_config_t *cfg,
                       const pan_tilt_pose_t *pose,

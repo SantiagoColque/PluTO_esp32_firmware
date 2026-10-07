@@ -4,6 +4,7 @@
 
 #define FULL_TURN_CDEG 36000
 #define HALF_TURN_CDEG 18000
+#define ZENITH_CDEG 9000
 
 static int32_t wrap_azimuth(int32_t cdeg)
 {
@@ -66,12 +67,23 @@ bool pan_tilt_reachable(const pan_tilt_config_t *cfg, int32_t az_cdeg, int32_t e
     return pan_tilt_from_azel(cfg, PAN_TILT_NORMAL, az_cdeg, el_cdeg, &pose);
 }
 
+pan_tilt_mode_t pan_tilt_pose_mode(const pan_tilt_pose_t *pose)
+{
+    /* The zenith keeps the label: the azimuth is undefined there, and taking
+     * either mode would break the round trip of pan_tilt_from_azel() for a
+     * target at 90 degrees. */
+    if (pose->tilt_cdeg < ZENITH_CDEG || (pose->tilt_cdeg == ZENITH_CDEG && pose->mode == PAN_TILT_NORMAL)) {
+        return PAN_TILT_NORMAL;
+    }
+    return PAN_TILT_FLIPPED;
+}
+
 void pan_tilt_to_azel(const pan_tilt_config_t *cfg,
                       const pan_tilt_pose_t *pose,
                       int32_t *az_cdeg,
                       int32_t *el_cdeg)
 {
-    if (pose->mode == PAN_TILT_NORMAL) {
+    if (pan_tilt_pose_mode(pose) == PAN_TILT_NORMAL) {
         *az_cdeg = wrap_azimuth(cfg->az_ref_cdeg + pose->pan_cdeg);
         *el_cdeg = pose->tilt_cdeg;
     } else {
