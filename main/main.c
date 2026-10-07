@@ -14,6 +14,7 @@
 #include "log_ring.h"
 #include "mqtt_manager.h"
 #include "rotor.h"
+#include "servo_driver.h"
 #include "sntp_manager.h"
 #include "web_server.h"
 #include "wifi_manager.h"
@@ -168,27 +169,49 @@ static void rotor_task(void *arg)
 {
     TickType_t last_state = xTaskGetTickCount();
     rotor_mode_t last_mode = ROTOR_MODE_IDLE;
+    /* What the servos were last given, so a pose goes to the driver once.
+     * Releasing the servos (HU-35) must clear servo_sent, or an unchanged
+     * pose would never wake them again. */
+    bool servo_sent = false;
+    pan_tilt_pose_t servo_pose = {0};
+    bool servo_failing = false;
 
     (void)arg;
 
     for (;;) {
         pan_tilt_pose_t pose;
+        bool has_pose;
         rotor_mode_t mode;
-        bool moved;
         bool mode_unreported;
         TickType_t period;
 
         xSemaphoreTake(s_rotor_lock, portMAX_DELAY);
-        moved = rotor_tick(&s_rotor, now_ms());
+        rotor_tick(&s_rotor, now_ms());
+        has_pose = s_rotor.has_pose;
         pose = s_rotor.pose;
         mode = s_rotor.mode;
         mode_unreported = mode != s_reported_mode;
         xSemaphoreGive(s_rotor_lock);
 
-        if (moved) {
-            /* The servo driver (issue #4) takes the angles from here. */
-            ESP_LOGD(TAG, "pan=%ld tilt=%ld (%s)", (long)pose.pan_cdeg, (long)pose.tilt_cdeg,
-                     pose.mode == PAN_TILT_FLIPPED ? "flipped" : "normal");
+        /* Compared against what was sent, not against rotor_tick()'s result:
+         * the MQTT handler's own tick consumes the change an accepted batch
+         * makes, so a single-point batch would never move the servos and a
+         * pass sent ahead would not pre-position them (rotor.h). Only pan and
+         * tilt reach the servos; the mode does not change a pulse. */
+        if (has_pose && (!servo_sent || pose.pan_cdeg != servo_pose.pan_cdeg ||
+                         pose.tilt_cdeg != servo_pose.tilt_cdeg)) {
+            esp_err_t err = servo_driver_set(pose.pan_cdeg, pose.tilt_cdeg);
+
+            if (err == ESP_OK) {
+                servo_sent = true;
+                servo_pose = pose;
+                servo_failing = false;
+            } else if (!servo_failing) {
+                /* Once per run of failures: this retries every tick and
+                 * /logs only keeps a few lines. */
+                ESP_LOGE(TAG, "Servos not driven: %s", esp_err_to_name(err));
+                servo_failing = true;
+            }
         }
         if (mode != last_mode) {
             ESP_LOGI(TAG, "Rotor mode: %s", rotor_mode_name(mode));
@@ -210,6 +233,24 @@ static void start_rotor(void)
     /* Mount facing north with both servos on their full range until the
      * calibration (az_ref and limits) is stored in config_store. */
     const pan_tilt_config_t mount = PAN_TILT_CONFIG_DEFAULT;
+    /* Pins and pulses from Kconfig until they are stored in NVS too. */
+    const servo_driver_config_t servos = {
+        .pan = {
+            .gpio_num = CONFIG_PLUTO_SERVO_PAN_GPIO,
+            .calibration = {CONFIG_PLUTO_SERVO_PAN_US_AT_0, CONFIG_PLUTO_SERVO_PAN_US_AT_180},
+        },
+        .tilt = {
+            .gpio_num = CONFIG_PLUTO_SERVO_TILT_GPIO,
+            .calibration = {CONFIG_PLUTO_SERVO_TILT_US_AT_0, CONFIG_PLUTO_SERVO_TILT_US_AT_180},
+        },
+    };
+
+    /* Not worth a reboot loop: a bad pin or calibration needs a reflash
+     * either way, and meanwhile the board keeps following and reporting the
+     * trajectory with the dashboard and /logs reachable to say why. */
+    if (servo_driver_init(&servos) != ESP_OK) {
+        ESP_LOGE(TAG, "Servos not started; tracking without moving the mount");
+    }
 
     rotor_init(&s_rotor, &mount, CONFIG_PLUTO_EXPIRED_POINT_TOLERANCE_MS);
     s_rotor_lock = xSemaphoreCreateMutex();
