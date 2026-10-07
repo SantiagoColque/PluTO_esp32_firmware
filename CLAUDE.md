@@ -30,12 +30,24 @@ has a strange-looking bound, the reason is usually a specific RNF (see
    manager, the HTTP server and the event loop each run on their own task, so the
    dashboard stays reachable and reconnection keeps going for as long as it takes.
 6. SNTP. A missing clock is a warning, not a reboot — the poller keeps trying.
-7. `mqtt_manager_init()`.
+7. `start_rotor()`: the servo driver, the rotor state and the rotor task.
+8. `mqtt_manager_init()`, with `coordinates_message_handler` as the data callback.
 
-Once MQTT is up, the device publishes its `device_id` to `device/subscription` and
-subscribes to `device/<device_id>/coordinates/polar`. **Incoming coordinates are currently
-only logged**: `coordinates_message_handler` in `main.c` is where motor control will
-hook in, and it is the single biggest piece still missing.
+Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, its
+`device_id` on `device/subscription`, and subscribes to
+`device/<device_id>/coordinates/polar`. From there the pointing pipeline runs in `main.c`:
+
+- `coordinates_message_handler` hands each payload to `rotor_handle_payload()` under
+  `s_rotor_lock`. The rotor decodes and validates it, loads the trajectory and moves its
+  pose to the current target right away; the handler then publishes the state.
+- `rotor_task` runs every 50 ms. `rotor_tick()` follows the trajectory and turns az/el
+  into pan/tilt angles, and every pose that differs from the last one sent goes to
+  `servo_driver_set()`, outside the lock. **This is where the servos are driven**, and
+  it compares against the last pose sent rather than using `rotor_tick()`'s return
+  value: the handler's own tick consumes the change a new batch makes, so a
+  single-point batch would never move the servos (see `rotor.h`).
+- The same task publishes the state on `device/<device_id>/state`: every second while
+  tracking, every ten at rest, and at once when the mode changes.
 
 ## Components
 
@@ -72,8 +84,31 @@ Each is a standard IDF component under `components/`, with its public API in
   the build otherwise. A component with a new tag must be added to the list in
   `log_ring_core.c` to show on the page. The dashboard password line is redacted,
   because the page is reachable without login on the provisioning AP.
-- **mqtt_manager** — `esp-mqtt` client, registration publish and control subscription,
-  with a `mqtt_data_cb_t` callback handed in by `main`.
+- **mqtt_manager** — `esp-mqtt` client: the `status` publish with its last will, the
+  registration publish, the control subscription with a `mqtt_data_cb_t` callback
+  handed in by `main`, and `mqtt_manager_publish_state()`.
+
+The pointing pipeline is split the same way: pure components with host tests
+(`test_host/`), and `main` holding the task, the lock and the MQTT side.
+
+- **coord_dto** — decodes and validates the binary setpoint batch of
+  `coordinates-dto.md`, with the reject codes of `device-state.md` §5.
+- **trajectory** — what the board does between messages: a new batch replaces the
+  pending points, the target is interpolated in time with the azimuth taking the short
+  way round, it stays on the last point, and a `HOLD` drops everything pending.
+- **pan_tilt** — geographic az/el to the angles of two 180-degree servos, flipping past
+  the zenith for the back half of the sky (`coordinates-dto.md` §9). Kinematics only:
+  trims and pulses belong to `servo`.
+- **rotor** — the board's side of both contracts. Takes payloads, applies the rules that
+  need the clock and the mount (clock sync, expired points, reachability), follows the
+  trajectory and writes the JSON state. Time comes in as an argument.
+- **servo** — the two DS3218 on LEDC: 50 Hz, a 16-bit duty, one channel per servo.
+  `servo_pulse` is the pure half: servo angle to pulse width with a two-point
+  calibration per servo, which covers trim, scale, direction and the 270-degree version,
+  and a hard 500–2500 µs clamp. `servo_driver` is the LEDC half. Pins and calibration
+  come in through `servo_driver_init()` (the driver never reads Kconfig), and no pulse
+  goes out until the first pose. `servo_driver_release()` stops the pulses for HU-35,
+  but nothing calls it yet. Not yet checked on hardware.
 
 ## HTTP API
 
@@ -99,20 +134,23 @@ The dashboard's default password is derived from the MAC: `pluto-xxxxxx`, logged
 
 | topic | direction | payload |
 |---|---|---|
+| `device/<device_id>/coordinates/polar` | server → device | binary setpoint batch, QoS 1, never retained |
+| `device/<device_id>/status` | device → server | `online`, retained; `offline` is the last will |
+| `device/<device_id>/state` | device → server | JSON state document, QoS 0 |
 | `device/subscription` | device → server | the bare `device_id`, published on every connect |
-| `device/<device_id>/coordinates/polar` | server → device | binary setpoint batch, `docs/contract/coordinates-dto.md` |
 
-`device_id` is the station MAC as twelve lowercase hex digits. The registration topic is
-a compile-time constant (`CONFIG_MQTT_TOPIC_SUBSCRIPTION`) rather than a dashboard field,
-because it is part of the backend contract and not site configuration.
+`device_id` is the station MAC as twelve lowercase hex digits.
 
-Nothing publishes on the control topic yet — the server's chain currently ends at
-`plugin/<uuid>/coordinates/polar`, and the bridge between the two is unbuilt on both sides.
+The contracts live in the PluTO repo, under `docs/contracts/`: `coordinates-dto.md` for
+the batch (a packed little-endian list of az/el setpoints, each carrying the instant it
+must be reached, at `19 + 8*count` bytes) and `device-state.md` for `status` and
+`state`. Read them before touching either side. `docs/contract/coordinates-dto.md` in
+this repo is an older copy from before the decoder existed; do not go by it.
 
-The wire format **is** settled, in `docs/contract/coordinates-dto.md`: a packed
-little-endian batch of az/el setpoints, each carrying the instant it must be reached, at
-`19 + 8*count` bytes. Read it before touching either side; neither the decoder nor the
-encoder exists yet, so that document is the only thing keeping the two repos in agreement.
+On the server, `mqtt_dispatch` bridges `plugin/<uuid>/coordinates/polar` to the device
+topic, and the ingest registers a board from its first `status` or `state`. It rejects
+`device/subscription`, which the firmware still publishes: the topic is a compile-time
+constant (`CONFIG_MQTT_TOPIC_SUBSCRIPTION`), kept until both sides agree to drop it.
 
 Note that two topics end in `/coordinates/polar` and carry different encodings — the
 `plugin/...` one is JSON, the `device/...` one is the binary DTO. That is deliberate but
@@ -129,14 +167,26 @@ boot for development; it must never be enabled in a build that ships.
 Leaving `CONFIG_WIFI_SSID` empty is the intended production flow: the device starts
 unprovisioned and raises the setup portal. Setting it is a development shortcut.
 
+The *"PluTO servos"* menu (`components/servo/Kconfig`) works differently: its values are
+compiled in and applied by `start_rotor()` on every boot, and none is stored in NVS, so
+a change means reflashing. It holds the DS3218 version (270 degrees by default, the
+narrow range, until the servos are identified), the signal pins (25 and 26, leaving
+21/22 and 32/33 for the encoders' I2C), and each servo's pulse at 0 and at 180 degrees.
+The version only sets the pulses' defaults: once `sdkconfig` exists, changing it leaves
+the saved pulses alone.
+
 ## Build and flash
 
     idf.py set-target esp32
-    idf.py menuconfig          # optional; only seeds a blank NVS
+    idf.py menuconfig          # optional; seeds a blank NVS and sets the servos
     idf.py build
     idf.py -p /dev/ttyUSB0 flash monitor
 
-`sdkconfig` is committed; `sdkconfig.defaults` holds the choices that carry a reason:
+It needs ESP-IDF v5.5 or later: `log_ring` checks `CONFIG_LOG_VERSION`, which older
+versions lack. Development uses v5.5.2.
+
+`sdkconfig` is not committed (`.gitignore` excludes it): each checkout generates its own
+from `sdkconfig.defaults`, which holds the choices that carry a reason:
 
 - a **custom partition table** (`partitions.csv`), because the stock single-app layout
   caps the app at 1 MB and the captive-portal build does not fit comfortably. It is sized
@@ -148,8 +198,13 @@ unprovisioned and raises the setup portal. Setting it is a development shortcut.
   an obvious error.
 - `CONFIG_COMPILER_OPTIMIZATION_SIZE`, since `-Og` costs roughly 15% of the image.
 
-`.vscode/settings.json` points the ESP-IDF extension at `~/esp/esp-idf` and
-`/dev/ttyUSB0`; adjust locally rather than committing a different path.
+`.vscode/` is not committed either: point the ESP-IDF extension at your own
+`~/esp/esp-idf` and serial port locally.
+
+The pure components have host tests, built with the host compiler under ASan and UBSan:
+
+    make -C components/rotor/test_host
+    bash -c 'for d in components/*/test_host; do make -C "$d" || exit 1; done'
 
 ## Conventions
 
@@ -170,13 +225,15 @@ unprovisioned and raises the setup portal. Setting it is a development shortcut.
 
 Roughly in the order the SRS prioritizes them:
 
-- **Motor control** (HU-01 / RF-01.3) — no PWM, no servo driver, no axes. The received
-  coordinates are logged and dropped.
-- **Binary DTO** (HU-10) — the format is specified in `docs/contract/coordinates-dto.md`
-  but neither the firmware decoder nor the server encoder is written.
-- **Software mechanical limits** (HU-07) — must live in firmware per RNF-07.1.
-- **Homing / zero calibration** (HU-28) and north offset (HU-09 / RF-09.1).
-- **Speed and acceleration limiting** (HU-36), telemetry of actual position (HU-24, HU-29),
-  elevation threshold (HU-30).
+- **Stored calibration**: software mechanical limits (HU-07, which RNF-07.1 puts in
+  firmware) and north offset (HU-09 / RF-09.1). `pan_tilt` already enforces both, but
+  `start_rotor()` uses `PAN_TILT_CONFIG_DEFAULT` until they are stored in NVS. The servo
+  pins and pulses come from Kconfig for the same reason.
+- **Homing / zero calibration** (HU-28).
+- **Speed and acceleration limiting** (HU-36) and the rest state (HU-35). Poses go to
+  the servos as computed, so a change of pan-tilt mode turns the pan 180 degrees at the
+  servo's full speed.
+- **Telemetry of actual position** (HU-24, HU-29): the state reports the commanded pose.
+  Elevation threshold (HU-30).
 - **OTA updates** (HU-32) — the partition table has a single `factory` app slot, so
   adding OTA means changing it.
