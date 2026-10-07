@@ -29,6 +29,23 @@ typedef struct {
     bool provisioned;
 } pluto_config_t;
 
+/*
+ * The mount's calibration: the geographic heading the pan faces at 0 and the
+ * usable range of each joint, in centidegrees, with the meaning of the fields
+ * of the same name in pan_tilt.h. Plain integers rather than pan_tilt_config_t
+ * so this component does not depend on the kinematics; main converts it.
+ *
+ * Stored apart from pluto_config_t, in a namespace of its own, so that
+ * re-provisioning the WiFi with config_store_factory_reset() does not lose it.
+ */
+typedef struct {
+    int32_t az_ref_cdeg;
+    int32_t pan_min_cdeg;
+    int32_t pan_max_cdeg;
+    int32_t tilt_min_cdeg;
+    int32_t tilt_max_cdeg;
+} pluto_calibration_t;
+
 esp_err_t config_store_init(void);
 esp_err_t config_store_get(pluto_config_t *out);
 esp_err_t config_store_set(const pluto_config_t *in);
@@ -36,7 +53,30 @@ esp_err_t config_store_validate(const pluto_config_t *in, char *err, size_t err_
 esp_err_t config_store_set_admin_password(const char *password);
 esp_err_t config_store_set_home_channel(uint8_t channel);
 bool config_store_is_provisioned(void);
+
+/**
+ * @brief Erase the network and dashboard configuration (pluto_config_t).
+ *
+ * The mount's calibration lives in another namespace and is kept.
+ */
 esp_err_t config_store_factory_reset(void);
+
+/**
+ * @brief Copy the mount's calibration.
+ *
+ * config_store_init() loads it: from NVS when it holds one, otherwise from the
+ * PLUTO_CAL_* menuconfig seed, which is then written to NVS. It is not
+ * range-checked here; check it with pan_tilt_config_valid() before using it.
+ */
+esp_err_t config_store_get_calibration(pluto_calibration_t *out);
+
+/**
+ * @brief Store the mount's calibration in NVS and in the RAM copy.
+ *
+ * Stores whatever it is given: validate first. The rotor copies the
+ * calibration once when it starts, so a new one applies after a restart.
+ */
+esp_err_t config_store_set_calibration(const pluto_calibration_t *in);
 
 /**
  * @brief Borrow the RAM cache instead of copying it.

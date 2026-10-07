@@ -78,6 +78,55 @@ menu "PluTO Firmware Configuration"
         help
             POSIX timezone string applied after the clock is synchronized.
 
+    menu "Mount calibration (first-boot seed)"
+
+        comment "Centidegrees (0.01 degree). Kept in NVS apart from the network settings."
+
+        config PLUTO_CAL_AZ_REF_CDEG
+            int "Mount heading, az_ref (centidegrees)"
+            default 0
+            range 0 35999
+            help
+                Geographic azimuth the pan faces at 0, clockwise from north:
+                9000 means the pan's 0 points east. Seeds NVS when it holds no
+                calibration yet; afterwards the stored value wins.
+
+        config PLUTO_CAL_PAN_MIN_CDEG
+            int "Pan lower limit (centidegrees)"
+            default 0
+            range 0 18000
+            help
+                Lowest pan angle the mount may use. Must stay below the upper
+                limit: a calibration that breaks it is ignored at boot in
+                favour of the default mount (facing north, full ranges), with a
+                warning in the log.
+
+        config PLUTO_CAL_PAN_MAX_CDEG
+            int "Pan upper limit (centidegrees)"
+            default 18000
+            range 0 18000
+            help
+                Highest pan angle the mount may use.
+
+        config PLUTO_CAL_TILT_MIN_CDEG
+            int "Tilt lower limit (centidegrees)"
+            default 0
+            range 0 18000
+            help
+                Lowest tilt angle the mount may use: 0 is the horizon ahead.
+                Must stay below the upper limit.
+
+        config PLUTO_CAL_TILT_MAX_CDEG
+            int "Tilt upper limit (centidegrees)"
+            default 18000
+            range 0 18000
+            help
+                Highest tilt angle the mount may use: 18000 is the horizon
+                behind. Below 18000 it narrows what the flipped mode reaches,
+                that is, low elevations behind the mount.
+
+    endmenu
+
     config PLUTO_FORCE_KCONFIG_SEED
         bool "Re-seed NVS from these values on every boot"
         default n
@@ -85,8 +134,8 @@ menu "PluTO Firmware Configuration"
             Without this, the values above are ignored once NVS holds a
             configuration, which is surprising during development ("I changed
             the SSID in menuconfig and nothing happened"). Enable it to make
-            menuconfig authoritative on every boot. Never enable it in a build
-            that ships.
+            menuconfig authoritative on every boot, the mount calibration
+            included. Never enable it in a build that ships.
 
     config WIFI_RECONNECT_MAX_BACKOFF_SEC
         int "Maximum WiFi reconnect backoff (seconds)"
