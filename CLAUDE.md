@@ -39,12 +39,21 @@ Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, i
 `device/<device_id>/coordinates/polar`. From there the pointing pipeline runs in `main.c`:
 
 - `coordinates_message_handler` hands each payload to `rotor_handle_payload()` under
-  `s_rotor_lock`. The rotor decodes and validates it, loads the trajectory and moves its
-  pose to the current target right away; the handler then publishes the state.
-- `rotor_task` runs every 50 ms. `rotor_tick()` follows the trajectory and turns az/el
-  into pan/tilt angles, and the pose goes to `servo_driver_set()` on every tick, outside
-  the lock. **This is where the servos are driven**; the driver skips a duty it already
-  has.
+  `s_rotor_lock`. The rotor decodes and validates it, loads the trajectory and updates
+  its target; the handler then publishes the state. It does not move the servos, except
+  for the very first pose, which is taken as is because there is no position to ramp
+  from.
+- `rotor_task` runs every 50 ms. `rotor_tick()` follows the trajectory, turns az/el into
+  pan/tilt angles and steps each axis toward them within the speed and acceleration
+  limits of `motion_profile`, with the time since the last tick measured on
+  `esp_timer`, never on the wall clock that SNTP steps. **This is where the servos are
+  driven** (`drive_servos()`, outside the lock): every commanded pose that differs from
+  the last one sent goes to `servo_driver_set()`, so a ramp sends one on each tick. It
+  compares against the last pose sent rather than using `rotor_tick()`'s return value,
+  because the handler's own tick can set a pose that no later tick reports (see
+  `rotor.h`). When `rotor_outputs_resting()` says both axes have stood still for the
+  rest timeout, it calls `servo_driver_release()` (HU-35); the next pose to go out,
+  changed or not, resumes the pulses.
 - The same task publishes the state on `device/<device_id>/state`: every second while
   tracking, every ten at rest, and at once when the mode changes.
 
@@ -104,17 +113,29 @@ The pointing pipeline is split the same way: pure components with host tests
 - **pan_tilt** — geographic az/el to the angles of two 180-degree servos, flipping past
   the zenith for the back half of the sky (`coordinates-dto.md` §9). Kinematics only:
   trims and pulses belong to `servo`.
+- **motion_profile** — per axis, in servo space: limits speed and acceleration (HU-36)
+  along a braking curve worked out step by step, so it stops on a fixed target without
+  overshooting, brakes at the acceleration limit after a `HOLD`, and tells when an axis
+  has stood still at the same target for `rest_after_ms` (HU-35). Elapsed time is an
+  argument. With no position known (no encoders yet) the first target is taken as is.
 - **rotor** — the board's side of both contracts. Takes payloads, applies the rules that
   need the clock and the mount (clock sync, expired points, reachability), follows the
-  trajectory and writes the JSON state. Time comes in as an argument.
+  trajectory through `motion_profile` and writes the JSON state. It keeps the target
+  apart from the commanded pose: the pan-tilt hysteresis goes by the target's mode, the
+  pose reports the mode it is physically in (`pan_tilt_pose_mode()`), and `az_cdeg` and
+  `el_cdeg` in the state are that commanded pose. A `HOLD` reports `holding` at once
+  while the axes brake; past the last point the mode stays `tracking` until both axes
+  arrive. Time comes in as arguments: the wall clock for the trajectory, a monotonic
+  `dt_ms` for the motion.
 - **servo** — the two DS3218 on LEDC: 50 Hz, a 16-bit duty, one channel per servo.
   `servo_pulse` is the pure half: servo angle to pulse width with a two-point
   calibration per servo, which covers trim, scale, direction and the 270-degree version,
   and a hard 500–2500 µs clamp. `servo_driver` is the LEDC half. Pins and calibration
   come in through `servo_driver_init()` (the driver never reads Kconfig; `main` hands it
   the Kconfig pins and the stored pulses), and no pulse goes out until the first pose.
-  `servo_driver_release()` stops the pulses for HU-35 (duty 0, so no pulse is cut
-  short), but nothing calls it yet. Not yet checked on hardware.
+  `servo_driver_release()` stops the pulses on both channels for HU-35 (duty 0, so no
+  pulse is cut short), and the next `servo_driver_set()` resumes them. Not yet checked on
+  hardware.
 
 ## HTTP API
 
@@ -190,6 +211,14 @@ and the DS3218 version (270 degrees by default, the narrow range, until the serv
 identified). The version only sets the pulses' defaults: once `sdkconfig` exists,
 changing it leaves the pulses saved there alone.
 
+The *"PluTO motion profile"* menu (`components/motion_profile/Kconfig`) is compiled in
+the same way: top speed (`PLUTO_MOTION_MAX_SPEED_DEG_S`, 60 °/s), acceleration
+(`PLUTO_MOTION_MAX_ACCEL_DEG_S2`, 120 °/s²) and the rest timeout
+(`PLUTO_MOTION_REST_AFTER_MS`, 5 s), one set for both axes, in degrees for whoever tunes
+them; `start_rotor()` converts them to centidegrees. 0 turns a limit off, and a rest
+timeout of 0 keeps the servos driven forever. Speeds much below 20 °/s fall behind a
+high pass (`test_a_high_pass_keeps_up` in the rotor tests).
+
 ## Build and flash
 
     idf.py set-target esp32
@@ -231,8 +260,11 @@ The pure components have host tests, built with the host compiler under ASan and
 - Conventional commits with a scope: `feat(wifi):`, `chore:`, `fix:`. Branches are
   `feature/<issue>-<slug>`; PRs merge into `develop`.
 - One concern per component, public API in `include/` only, and no component reaching
-  back into another's internals. `main` is the only place allowed to wire components to
-  each other.
+  back into another's internals. A pure component (no ESP-IDF, host-tested) may build on
+  other pure components through their public API, the way `rotor` composes `coord_dto`,
+  `trajectory`, `pan_tilt` and `motion_profile`. Whatever touches hardware, the network,
+  NVS or a task (`servo`, `config_store`, `mqtt_manager`, the lock) is wired only by
+  `main`.
 - Static state is file-scoped and `s_`-prefixed. Errors propagate as `esp_err_t`;
   `ESP_ERROR_CHECK` is for genuinely unrecoverable setup, not for anything a retry could fix.
 
@@ -246,10 +278,12 @@ Roughly in the order the SRS prioritizes them:
   caller (the dashboard or a command) is card 4b; until then it takes a reflash with
   `CONFIG_PLUTO_FORCE_KCONFIG_SEED`.
 - **Homing / zero calibration** (HU-28).
-- **Speed and acceleration limiting** (HU-36) and the rest state (HU-35). Poses go to
-  the servos as computed, so a change of pan-tilt mode turns the pan 180 degrees at the
-  servo's full speed.
-- **Telemetry of actual position** (HU-24, HU-29): the state reports the commanded pose.
+- **Bench tuning of the motion profile**: the speed, acceleration and rest timeout are
+  compile-time and shared by both axes, and the rest state cuts both outputs at once.
+  Whether the DS3218 holds the tilt under the antenna without pulses, and so which
+  outputs may be cut, is still to be measured.
+- **Telemetry of actual position** (HU-24, HU-29): the state reports the commanded pose
+  after the motion profile, not a measured one.
   Elevation threshold (HU-30).
 - **OTA updates** (HU-32) — the partition table has a single `factory` app slot, so
   adding OTA means changing it.

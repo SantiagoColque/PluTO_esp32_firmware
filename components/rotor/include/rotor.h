@@ -101,11 +101,13 @@ bool rotor_tick(rotor_t *rotor, int64_t now_ms, int32_t dt_ms);
  * @brief Whether the servo outputs can be released (HU-35).
  *
  * True before the first pose, and once both axes have stood still at the
- * same target for the profile's rest_after_ms. A new target turns it false as
- * soon as it arrives, possibly before the commanded angles change, so the
- * driver has to be given the pose again when this goes false even if
- * rotor_tick() reports no change. Which outputs to actually cut is the
- * driver's call: a released servo may sag under the antenna.
+ * same target for the profile's rest_after_ms. A different target, or any
+ * target after a HOLD, turns it false as soon as it arrives, possibly before
+ * the commanded angles change, so the driver has to be given the pose again
+ * when this goes false even if rotor_tick() reports no change. A batch that
+ * repeats the target the axes rest at leaves it true: nothing has to move.
+ * It speaks for both axes together; main releases both outputs at once, and
+ * whether one of them may sag under the antenna is still to be measured.
  */
 bool rotor_outputs_resting(const rotor_t *rotor);
 

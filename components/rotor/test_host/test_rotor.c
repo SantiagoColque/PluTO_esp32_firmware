@@ -440,6 +440,49 @@ static void test_the_outputs_rest_and_wake(void)
     CHECK(!rotor_outputs_resting(&rotor));
 }
 
+/* What main's drive_servos() relies on to release and resume the outputs: a
+ * batch that only repeats where the axes rest moves nothing and keeps them at
+ * rest, while after a HOLD any target, even the spot they stopped on, wakes
+ * them with the commanded pose unchanged. */
+static void test_only_something_to_do_wakes_the_outputs(void)
+{
+    rotor_t rotor;
+    int64_t now = T0;
+    pan_tilt_pose_t rested;
+    int32_t az;
+    int32_t el;
+
+    new_limited_rotor(&rotor, &LIMITS);
+    send_point(&rotor, 4500, 3000, T0, now);
+    for (int i = 0; i < 5000 / TICK_MS; i++) {
+        now += TICK_MS;
+        rotor_tick(&rotor, now, TICK_MS);
+    }
+    CHECK(rotor_outputs_resting(&rotor));
+
+    send_point(&rotor, 4500, 3000, now, now);
+    CHECK(rotor_outputs_resting(&rotor));
+    now += TICK_MS;
+    CHECK(!rotor_tick(&rotor, now, TICK_MS));
+    CHECK(rotor_outputs_resting(&rotor));
+
+    send_hold(&rotor, now);
+    for (int i = 0; i < 5000 / TICK_MS; i++) {
+        now += TICK_MS;
+        rotor_tick(&rotor, now, TICK_MS);
+    }
+    CHECK(rotor_outputs_resting(&rotor));
+
+    rested = rotor.pose;
+    pan_tilt_to_azel(&rotor.mount, &rested, &az, &el);
+    send_point(&rotor, (uint16_t)az, (int16_t)el, now, now);
+    CHECK(!rotor_outputs_resting(&rotor));
+    now += TICK_MS;
+    CHECK(!rotor_tick(&rotor, now, TICK_MS));
+    CHECK(rotor.pose.pan_cdeg == rested.pan_cdeg && rotor.pose.tilt_cdeg == rested.tilt_cdeg);
+    CHECK(!rotor_outputs_resting(&rotor));
+}
+
 /*
  * A pass culminating at 88 degrees, from a 500 km orbit, crossing the sky
  * from north to south east of the station. The pan follows the azimuth, which
@@ -557,6 +600,7 @@ int main(void)
     test_the_hysteresis_follows_the_target_not_the_servos();
     test_a_flip_reports_where_the_servos_point();
     test_the_outputs_rest_and_wake();
+    test_only_something_to_do_wakes_the_outputs();
     test_a_high_pass_keeps_up();
     test_the_json_refuses_a_short_buffer();
     test_the_longest_state_fits();

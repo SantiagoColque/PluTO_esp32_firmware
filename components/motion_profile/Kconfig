@@ -35,8 +35,8 @@ menu "PluTO motion profile"
         range 0 3600000
         help
             Once both axes have stood still at the same target for this long,
-            the servo outputs can be released, and a new target brings them
-            back before the first move (HU-35). 0 never releases them. Whether
+            the rotor task releases both servo outputs, and a new target brings
+            them back before the first move (HU-35). 0 never releases them. Whether
             a DS3218 without pulses holds its position or sags under the
             antenna is still to be measured on the bench; if the tilt sags,
             lengthen this so it only acts between passes, or set it to 0.
