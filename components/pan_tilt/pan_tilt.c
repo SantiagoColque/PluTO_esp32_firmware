@@ -1,5 +1,7 @@
 #include "pan_tilt.h"
 
+#include <stddef.h>
+
 #define FULL_TURN_CDEG 36000
 #define HALF_TURN_CDEG 18000
 
@@ -76,4 +78,22 @@ void pan_tilt_to_azel(const pan_tilt_config_t *cfg,
         *az_cdeg = wrap_azimuth(cfg->az_ref_cdeg + pose->pan_cdeg + HALF_TURN_CDEG);
         *el_cdeg = HALF_TURN_CDEG - pose->tilt_cdeg;
     }
+}
+
+/* Comparisons only, no arithmetic, so a corrupted stored value near the int32
+ * limits cannot overflow on its way to being rejected. */
+static bool range_valid(int32_t min_cdeg, int32_t max_cdeg)
+{
+    return min_cdeg >= 0 && min_cdeg < max_cdeg && max_cdeg <= HALF_TURN_CDEG;
+}
+
+bool pan_tilt_config_valid(const pan_tilt_config_t *cfg)
+{
+    if (cfg == NULL) {
+        return false;
+    }
+
+    return cfg->az_ref_cdeg >= 0 && cfg->az_ref_cdeg < FULL_TURN_CDEG &&
+           range_valid(cfg->pan_min_cdeg, cfg->pan_max_cdeg) &&
+           range_valid(cfg->tilt_min_cdeg, cfg->tilt_max_cdeg);
 }

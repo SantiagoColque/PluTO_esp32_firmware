@@ -141,6 +141,95 @@ static void test_the_inverse_recovers_the_target(void)
     }
 }
 
+static void test_the_default_config_is_valid(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+
+    CHECK(pan_tilt_config_valid(&cfg));
+}
+
+static void test_a_narrowed_and_turned_mount_is_valid(void)
+{
+    pan_tilt_config_t cfg = {.az_ref_cdeg = 21550,
+                             .pan_min_cdeg = 1000,
+                             .pan_max_cdeg = 17000,
+                             .tilt_min_cdeg = 500,
+                             .tilt_max_cdeg = 12000};
+
+    CHECK(pan_tilt_config_valid(&cfg));
+}
+
+static void test_az_ref_must_be_a_heading(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+
+    cfg.az_ref_cdeg = 35999;
+    CHECK(pan_tilt_config_valid(&cfg));
+    /* 360 degrees is north again; only the 0 spelling is accepted, so a stored
+     * value has a single meaning. */
+    cfg.az_ref_cdeg = 36000;
+    CHECK(!pan_tilt_config_valid(&cfg));
+    cfg.az_ref_cdeg = -1;
+    CHECK(!pan_tilt_config_valid(&cfg));
+    cfg.az_ref_cdeg = INT32_MIN;
+    CHECK(!pan_tilt_config_valid(&cfg));
+}
+
+static void test_limits_must_fit_a_180_degree_servo(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+
+    cfg.pan_min_cdeg = -1;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.pan_max_cdeg = 18001;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.tilt_min_cdeg = -1;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.tilt_max_cdeg = 18001;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.pan_max_cdeg = INT32_MAX;
+    cfg.tilt_min_cdeg = INT32_MIN;
+    CHECK(!pan_tilt_config_valid(&cfg));
+}
+
+static void test_each_range_must_be_open(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+
+    /* An empty range would make every batch unreachable, which looks like a
+     * server bug from the other side. */
+    cfg.pan_min_cdeg = 9000;
+    cfg.pan_max_cdeg = 9000;
+    CHECK(!pan_tilt_config_valid(&cfg));
+    cfg.pan_min_cdeg = 9001;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.tilt_min_cdeg = 9000;
+    cfg.tilt_max_cdeg = 9000;
+    CHECK(!pan_tilt_config_valid(&cfg));
+    cfg.tilt_min_cdeg = 9001;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.pan_min_cdeg = 17999;
+    cfg.tilt_max_cdeg = 1;
+    CHECK(pan_tilt_config_valid(&cfg)); /* narrow, but not empty */
+}
+
+static void test_a_missing_config_is_invalid(void)
+{
+    CHECK(!pan_tilt_config_valid(NULL));
+}
+
 int main(void)
 {
     test_front_half_uses_the_normal_mode();
@@ -152,6 +241,12 @@ int main(void)
     test_narrowed_servo_ranges_are_enforced();
     test_the_default_config_covers_the_whole_sky();
     test_the_inverse_recovers_the_target();
+    test_the_default_config_is_valid();
+    test_a_narrowed_and_turned_mount_is_valid();
+    test_az_ref_must_be_a_heading();
+    test_limits_must_fit_a_180_degree_servo();
+    test_each_range_must_be_open();
+    test_a_missing_config_is_invalid();
 
     if (s_failures) {
         fprintf(stderr, "pan_tilt: %d check(s) failed\n", s_failures);

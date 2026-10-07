@@ -46,6 +46,17 @@ typedef struct {
     ((pan_tilt_config_t){.az_ref_cdeg = 0, .pan_min_cdeg = 0, .pan_max_cdeg = 18000, .tilt_min_cdeg = 0, .tilt_max_cdeg = 18000})
 
 /**
+ * @brief Whether a config describes a mount this mapping can drive.
+ *
+ * az_ref must be a heading in 0..35999, and each axis a non-empty range
+ * (min < max) within 0..18000. The mount's calibration lives in NVS, outside
+ * the firmware image, so it is checked with this before the rotor gets it: a
+ * range past 0..18000 would command angles a 180-degree servo cannot reach, and
+ * an empty one would turn every batch `unreachable`.
+ */
+bool pan_tilt_config_valid(const pan_tilt_config_t *cfg);
+
+/**
  * @brief Servo angles that point at a geographic az/el.
  *
  * Keeps the current mode while it reaches the target and switches only when it
