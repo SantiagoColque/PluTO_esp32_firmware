@@ -50,6 +50,10 @@
 #define KEY_CAL_PAN_MAX "pan_max"
 #define KEY_CAL_TILT_MIN "tilt_min"
 #define KEY_CAL_TILT_MAX "tilt_max"
+#define KEY_CAL_PAN_US_AT_0 "pan_us0"
+#define KEY_CAL_PAN_US_AT_180 "pan_us180"
+#define KEY_CAL_TILT_US_AT_0 "tilt_us0"
+#define KEY_CAL_TILT_US_AT_180 "tilt_us180"
 
 static const char *TAG = "config_store";
 
@@ -125,6 +129,12 @@ static void apply_calibration_seed(pluto_calibration_t *cal)
     cal->pan_max_cdeg = CONFIG_PLUTO_CAL_PAN_MAX_CDEG;
     cal->tilt_min_cdeg = CONFIG_PLUTO_CAL_TILT_MIN_CDEG;
     cal->tilt_max_cdeg = CONFIG_PLUTO_CAL_TILT_MAX_CDEG;
+    /* The pulses' seed lives in the servo component's menu, next to the
+     * DS3218 version that sets their defaults, rather than in main's. */
+    cal->pan_us_at_0 = CONFIG_PLUTO_SERVO_PAN_US_AT_0;
+    cal->pan_us_at_180 = CONFIG_PLUTO_SERVO_PAN_US_AT_180;
+    cal->tilt_us_at_0 = CONFIG_PLUTO_SERVO_TILT_US_AT_0;
+    cal->tilt_us_at_180 = CONFIG_PLUTO_SERVO_TILT_US_AT_180;
 }
 
 /*
@@ -140,6 +150,10 @@ static esp_err_t write_calibration(nvs_handle_t handle, const pluto_calibration_
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_MAX, cal->pan_max_cdeg), TAG, "pan_max");
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_MIN, cal->tilt_min_cdeg), TAG, "tilt_min");
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_MAX, cal->tilt_max_cdeg), TAG, "tilt_max");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_US_AT_0, cal->pan_us_at_0), TAG, "pan_us0");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_US_AT_180, cal->pan_us_at_180), TAG, "pan_us180");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_US_AT_0, cal->tilt_us_at_0), TAG, "tilt_us0");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_US_AT_180, cal->tilt_us_at_180), TAG, "tilt_us180");
     ESP_RETURN_ON_ERROR(nvs_set_u8(handle, KEY_CAL_VERSION, CALIBRATION_FORMAT_VERSION), TAG, "cal_ver");
 
     return nvs_commit(handle);
@@ -199,6 +213,10 @@ static esp_err_t load_calibration(pluto_calibration_t *cal)
         load_i32(handle, KEY_CAL_PAN_MAX, &cal->pan_max_cdeg);
         load_i32(handle, KEY_CAL_TILT_MIN, &cal->tilt_min_cdeg);
         load_i32(handle, KEY_CAL_TILT_MAX, &cal->tilt_max_cdeg);
+        load_i32(handle, KEY_CAL_PAN_US_AT_0, &cal->pan_us_at_0);
+        load_i32(handle, KEY_CAL_PAN_US_AT_180, &cal->pan_us_at_180);
+        load_i32(handle, KEY_CAL_TILT_US_AT_0, &cal->tilt_us_at_0);
+        load_i32(handle, KEY_CAL_TILT_US_AT_180, &cal->tilt_us_at_180);
     }
 
     nvs_close(handle);
@@ -478,12 +496,17 @@ esp_err_t config_store_set_calibration(const pluto_calibration_t *in)
     nvs_close(handle);
 
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Mount calibration saved: az_ref=%ld pan=%ld..%ld tilt=%ld..%ld",
+        ESP_LOGI(TAG, "Mount calibration saved: az_ref=%ld pan=%ld..%ld tilt=%ld..%ld cdeg, "
+                      "pulses pan=%ld..%ld tilt=%ld..%ld us",
                  (long)in->az_ref_cdeg,
                  (long)in->pan_min_cdeg,
                  (long)in->pan_max_cdeg,
                  (long)in->tilt_min_cdeg,
-                 (long)in->tilt_max_cdeg);
+                 (long)in->tilt_max_cdeg,
+                 (long)in->pan_us_at_0,
+                 (long)in->pan_us_at_180,
+                 (long)in->tilt_us_at_0,
+                 (long)in->tilt_us_at_180);
     } else {
         ESP_LOGE(TAG, "Unable to save the mount calibration: %s", esp_err_to_name(err));
     }

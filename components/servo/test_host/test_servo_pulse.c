@@ -148,6 +148,38 @@ static void test_which_calibrations_are_valid(void)
     CHECK(!servo_calibration_valid(&above));
 }
 
+/* The pulses are stored in NVS, which holds whatever was written: a value that
+ * menuconfig's 500..2500 range would never let through, or a reversed servo
+ * with a point out of range on the side the forward cases above do not try. */
+static void test_a_stored_calibration_is_checked_on_both_points(void)
+{
+    const servo_calibration_t valid[] = {
+        {.us_at_0 = 500, .us_at_180 = 2500},
+        {.us_at_0 = 2500, .us_at_180 = 500},
+        {.us_at_0 = 500, .us_at_180 = 501}, /* one microsecond apart still drives it */
+        {.us_at_0 = 2166, .us_at_180 = 834},
+    };
+    const servo_calibration_t invalid[] = {
+        {.us_at_0 = 2501, .us_at_180 = 500}, /* reversed, 0-degree point above the range */
+        {.us_at_0 = 2500, .us_at_180 = 499}, /* reversed, 180-degree point below it */
+        {.us_at_0 = 500, .us_at_180 = 499},
+        {.us_at_0 = 2501, .us_at_180 = 2500},
+        {.us_at_0 = 500, .us_at_180 = 500}, /* flat on the edges */
+        {.us_at_0 = 2500, .us_at_180 = 2500},
+        {.us_at_0 = -1500, .us_at_180 = 1500},
+        {.us_at_0 = 1500, .us_at_180 = -1500},
+        {.us_at_0 = INT32_MIN, .us_at_180 = INT32_MAX},
+        {.us_at_0 = INT32_MAX, .us_at_180 = INT32_MIN},
+    };
+
+    for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); i++) {
+        CHECK(servo_calibration_valid(&valid[i]));
+    }
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        CHECK(!servo_calibration_valid(&invalid[i]));
+    }
+}
+
 int main(void)
 {
     test_the_calibrated_points_and_the_middle();
@@ -160,6 +192,7 @@ int main(void)
     test_duty_at_16_bits_and_50_hz();
     test_duty_clamps_the_pulse_too();
     test_which_calibrations_are_valid();
+    test_a_stored_calibration_is_checked_on_both_points();
 
     if (s_failures) {
         fprintf(stderr, "servo: %d check(s) failed\n", s_failures);

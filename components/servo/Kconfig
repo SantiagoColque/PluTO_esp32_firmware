@@ -1,7 +1,7 @@
 menu "PluTO servos"
 
-    comment "main reads these at boot and hands them to the servo driver."
-    comment "They are not stored in NVS: changing one means reflashing."
+    comment "The version and the pins are compiled in: changing one means reflashing."
+    comment "The pulses only seed the mount calibration in NVS, like the PLUTO_CAL_* values."
 
     choice PLUTO_SERVO_DS3218_VERSION
         prompt "DS3218 version"
@@ -24,7 +24,12 @@ menu "PluTO servos"
             Changing the version once sdkconfig exists does not change the
             pulses already saved in it: they count as set by hand. Set the
             four pulses again, or delete their lines from sdkconfig and run
-            idf.py reconfigure to get the new version's defaults.
+            idf.py reconfigure to get the new version's defaults. And since
+            the pulses only seed NVS, a board that already stored them needs
+            PLUTO_FORCE_KCONFIG_SEED for one boot to take the new ones.
+
+            The version also picks the nominal pulses a servo falls back to
+            when its stored pair is invalid.
 
         config PLUTO_SERVO_DS3218_180
             bool "180 degrees"
@@ -53,6 +58,7 @@ menu "PluTO servos"
 
     comment "Two-point calibration: the pulse that puts each servo at 0 and at 180 degrees."
     comment "It covers trim, scale and direction; reverse a servo by swapping the two."
+    comment "First-boot seed: once NVS holds the calibration, the stored pulses win."
 
     config PLUTO_SERVO_PAN_US_AT_0
         int "Pan pulse at 0 degrees (us)"
@@ -63,6 +69,11 @@ menu "PluTO servos"
             Pulse width that puts the pan servo at 0 degrees. The default is
             the nominal one for the version above (SERVO_CALIBRATION_DS3218_*
             in servo_pulse.h). Measure the real one on the bench.
+
+            Seeds NVS when it holds no calibration yet; afterwards the stored
+            value wins, until PLUTO_FORCE_KCONFIG_SEED re-seeds it. A pair
+            outside 500..2500 us or with both points equal is ignored at boot
+            in favour of the nominal pulses, with a warning in the log.
 
     config PLUTO_SERVO_PAN_US_AT_180
         int "Pan pulse at 180 degrees (us)"

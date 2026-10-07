@@ -13,8 +13,9 @@
  * It takes angles in servo space, centidegrees from 0 to 18000, already
  * limited by pan_tilt, and turns them into pulses with servo_pulse.h. Pins and
  * calibration come in through servo_driver_init() and the driver never reads
- * Kconfig itself, so whoever starts it decides where they come from: Kconfig
- * today, NVS once the calibration is stored there.
+ * Kconfig itself, so whoever starts it decides where they come from: main
+ * takes the pins from Kconfig and the pulses from the mount calibration that
+ * config_store keeps in NVS.
  *
  * Not thread-safe: every call must come from the same task, the rotor task.
  */

@@ -23,7 +23,8 @@ bool servo_calibration_valid(const servo_calibration_t *cal)
 int32_t servo_pulse_us(const servo_calibration_t *cal, int32_t cdeg)
 {
     /* 64 bits throughout: the span of two arbitrary int32 points times 18000
-     * does not fit in 32, and the struct may come from NVS one day. */
+     * does not fit in 32, and the pulses are loaded from NVS, where any int32
+     * can sit. */
     int64_t span = (int64_t)cal->us_at_180 - cal->us_at_0;
     int64_t scaled = span * clamp64(cdeg, 0, SERVO_SPAN_CDEG);
     int64_t offset = scaled / SERVO_SPAN_CDEG;

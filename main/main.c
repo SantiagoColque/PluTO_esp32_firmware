@@ -207,21 +207,49 @@ static void rotor_task(void *arg)
     }
 }
 
+/* The pulses a fresh sdkconfig seeds for the DS3218 version set in
+ * menuconfig, for a servo whose stored pulses cannot drive it. */
+#if CONFIG_PLUTO_SERVO_DS3218_180
+#define SERVO_CALIBRATION_NOMINAL SERVO_CALIBRATION_DS3218_180
+#else
+#define SERVO_CALIBRATION_NOMINAL SERVO_CALIBRATION_DS3218_270
+#endif
+
+/*
+ * A servo's stored pulses, checked like the mount: they come from outside the
+ * image, and the driver refuses a pair outside 500..2500 us or a flat one,
+ * which would leave the mount still. Each servo is checked on its own, since a
+ * bad pair for one says nothing about the other, and falls back to the nominal
+ * pulses rather than to none: the trim is lost, but the servo keeps the travel
+ * the version allows.
+ */
+static servo_calibration_t stored_servo_calibration(const char *name, int32_t us_at_0, int32_t us_at_180)
+{
+    const servo_calibration_t stored = {.us_at_0 = us_at_0, .us_at_180 = us_at_180};
+    const servo_calibration_t nominal = SERVO_CALIBRATION_NOMINAL;
+
+    if (servo_calibration_valid(&stored)) {
+        return stored;
+    }
+    ESP_LOGW(TAG, "Stored %s servo pulses %ld..%ld us are invalid; using the nominal %ld..%ld us",
+             name,
+             (long)us_at_0,
+             (long)us_at_180,
+             (long)nominal.us_at_0,
+             (long)nominal.us_at_180);
+    return nominal;
+}
+
 static void start_rotor(void)
 {
     pan_tilt_config_t mount = PAN_TILT_CONFIG_DEFAULT;
     const char *source = "default";
     pluto_calibration_t cal;
-    /* Pins and pulses from Kconfig until they are stored in NVS too. */
-    const servo_driver_config_t servos = {
-        .pan = {
-            .gpio_num = CONFIG_PLUTO_SERVO_PAN_GPIO,
-            .calibration = {CONFIG_PLUTO_SERVO_PAN_US_AT_0, CONFIG_PLUTO_SERVO_PAN_US_AT_180},
-        },
-        .tilt = {
-            .gpio_num = CONFIG_PLUTO_SERVO_TILT_GPIO,
-            .calibration = {CONFIG_PLUTO_SERVO_TILT_US_AT_0, CONFIG_PLUTO_SERVO_TILT_US_AT_180},
-        },
+    /* The pins follow the wiring, which only changes along with a reflash, so
+     * they stay in Kconfig; the pulses are part of the stored calibration. */
+    servo_driver_config_t servos = {
+        .pan = {.gpio_num = CONFIG_PLUTO_SERVO_PAN_GPIO, .calibration = SERVO_CALIBRATION_NOMINAL},
+        .tilt = {.gpio_num = CONFIG_PLUTO_SERVO_TILT_GPIO, .calibration = SERVO_CALIBRATION_NOMINAL},
     };
 
     /* The stored calibration comes from outside the image, so it is checked
@@ -249,8 +277,10 @@ static void start_rotor(void)
                      (long)stored.tilt_min_cdeg,
                      (long)stored.tilt_max_cdeg);
         }
+        servos.pan.calibration = stored_servo_calibration("pan", cal.pan_us_at_0, cal.pan_us_at_180);
+        servos.tilt.calibration = stored_servo_calibration("tilt", cal.tilt_us_at_0, cal.tilt_us_at_180);
     } else {
-        ESP_LOGW(TAG, "No calibration available; using the default mount");
+        ESP_LOGW(TAG, "No calibration available; using the default mount and the nominal servo pulses");
     }
 
     ESP_LOGI(TAG, "Mount (%s): az_ref=%ld pan=%ld..%ld tilt=%ld..%ld cdeg",
@@ -261,9 +291,10 @@ static void start_rotor(void)
              (long)mount.tilt_min_cdeg,
              (long)mount.tilt_max_cdeg);
 
-    /* Not worth a reboot loop: a bad pin or calibration needs a reflash
-     * either way, and meanwhile the board keeps following and reporting the
-     * trajectory with the dashboard and /logs reachable to say why. */
+    /* Not worth a reboot loop: the pulses were checked above, so what is
+     * left to refuse is a bad pin, which needs a reflash either way, and
+     * meanwhile the board keeps following and reporting the trajectory with
+     * the dashboard and /logs reachable to say why. */
     if (servo_driver_init(&servos) != ESP_OK) {
         ESP_LOGE(TAG, "Servos not started; tracking without moving the mount");
     }
