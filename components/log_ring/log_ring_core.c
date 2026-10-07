@@ -16,6 +16,7 @@ static const char *const s_our_tags[] = {
     "config_store",
     "sntp_manager",
     "dns_hijack",
+    "servo",
 };
 
 /* config_store prints the dashboard password at boot so the owner can read the
