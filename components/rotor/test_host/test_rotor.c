@@ -95,6 +95,34 @@ static void test_ticks_follow_the_trajectory_and_then_hold(void)
     CHECK(rotor.pose.pan_cdeg == 5500 && rotor.pose.tilt_cdeg == 3000);
 }
 
+/* The pose an accepted batch sets is never reported as a change by a later
+ * tick, because rotor_handle_payload() runs a tick of its own. Whatever drives
+ * the servos has to compare against what it last sent instead. */
+static void test_no_tick_reports_the_pose_a_payload_set(void)
+{
+    rotor_t rotor;
+    uint8_t buf[64];
+    const point_spec_t one[] = {{0, 4500, 3000}};
+    size_t len = pack(buf, 0, T0, T0 - 100, one, 1);
+
+    /* A single point: the antenna must go there, yet no tick ever says so. */
+    new_rotor(&rotor);
+    CHECK(rotor_handle_payload(&rotor, buf, len, T0 - 50, true));
+    CHECK(rotor.has_pose && rotor.pose.pan_cdeg == 4500 && rotor.pose.tilt_cdeg == 3000);
+    CHECK(!rotor_tick(&rotor, T0));
+    CHECK(!rotor_tick(&rotor, T0 + 5000));
+
+    /* A pass sent ahead: the pose sits on the first point from the moment it
+     * arrives, but the first tick to report a change is the one after t0. */
+    len = pack(buf, 0, T0, T0 - 2000, PASS, 3);
+    new_rotor(&rotor);
+    CHECK(rotor_handle_payload(&rotor, buf, len, T0 - 1950, true));
+    CHECK(rotor.has_pose && rotor.pose.pan_cdeg == 4500 && rotor.pose.tilt_cdeg == 1000);
+    CHECK(!rotor_tick(&rotor, T0 - 1900));
+    CHECK(!rotor_tick(&rotor, T0));
+    CHECK(rotor_tick(&rotor, T0 + 50));
+}
+
 static void test_the_back_of_the_sky_uses_the_flipped_mode(void)
 {
     rotor_t rotor;
@@ -223,6 +251,7 @@ int main(void)
     test_a_fresh_rotor_reports_idle();
     test_an_accepted_batch_starts_tracking();
     test_ticks_follow_the_trajectory_and_then_hold();
+    test_no_tick_reports_the_pose_a_payload_set();
     test_the_back_of_the_sky_uses_the_flipped_mode();
     test_a_decode_error_is_reported_without_a_header();
     test_the_time_based_rejections();

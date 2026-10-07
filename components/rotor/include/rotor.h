@@ -59,7 +59,8 @@ void rotor_init(rotor_t *rotor, const pan_tilt_config_t *mount, int64_t toleranc
  *
  * Returns true if it was accepted. Either way last_batch and rejected_total
  * describe the outcome for the state channel. A HOLD is applied even without a
- * synced clock, since stopping never depends on the time.
+ * synced clock, since stopping never depends on the time. An accepted batch
+ * moves pose to its current target right away, through rotor_tick().
  */
 bool rotor_handle_payload(rotor_t *rotor,
                           const uint8_t *payload,
@@ -70,8 +71,11 @@ bool rotor_handle_payload(rotor_t *rotor,
 /**
  * @brief Advance to now_ms: recompute the target, the servo angles and the mode.
  *
- * Returns true when the commanded angles changed, which is when the servo
- * driver has to move.
+ * Returns true when this call changed the commanded angles. That is not the
+ * signal to move the servos: rotor_handle_payload() runs a tick of its own, so
+ * the pose an accepted batch sets is never reported by a later tick, and a
+ * single-point batch never reports one at all. Whoever drives the servos
+ * compares has_pose and pose against what it last sent.
  */
 bool rotor_tick(rotor_t *rotor, int64_t now_ms);
 
