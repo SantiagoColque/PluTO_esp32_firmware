@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -169,6 +170,10 @@ static void rotor_task(void *arg)
 {
     TickType_t last_state = xTaskGetTickCount();
     rotor_mode_t last_mode = ROTOR_MODE_IDLE;
+    bool last_resting = true;
+    /* The servos move in monotonic time: SNTP steps the wall clock, and a
+     * jump there must not become a jump of the antenna. */
+    int64_t last_tick_us = esp_timer_get_time();
 
     (void)arg;
 
@@ -176,14 +181,21 @@ static void rotor_task(void *arg)
         pan_tilt_pose_t pose;
         bool has_pose;
         rotor_mode_t mode;
+        bool resting;
         bool mode_unreported;
         TickType_t period;
+        int32_t dt_ms = (int32_t)((esp_timer_get_time() - last_tick_us) / 1000);
+
+        /* Advanced by whole milliseconds so the remainder carries over to the
+         * next tick instead of making the profile run slow. */
+        last_tick_us += (int64_t)dt_ms * 1000;
 
         xSemaphoreTake(s_rotor_lock, portMAX_DELAY);
-        rotor_tick(&s_rotor, now_ms());
+        rotor_tick(&s_rotor, now_ms(), dt_ms);
         has_pose = s_rotor.has_pose;
         pose = s_rotor.pose;
         mode = s_rotor.mode;
+        resting = rotor_outputs_resting(&s_rotor);
         mode_unreported = mode != s_reported_mode;
         xSemaphoreGive(s_rotor_lock);
 
@@ -195,6 +207,12 @@ static void rotor_task(void *arg)
         if (mode != last_mode) {
             ESP_LOGI(TAG, "Rotor mode: %s", rotor_mode_name(mode));
             last_mode = mode;
+        }
+        if (resting != last_resting) {
+            /* The servo driver releases the outputs here, and takes the pose
+             * again when they wake (HU-35). */
+            ESP_LOGI(TAG, "Servo outputs %s", resting ? "at rest" : "active");
+            last_resting = resting;
         }
 
         period = pdMS_TO_TICKS(mode == ROTOR_MODE_TRACKING ? STATE_PERIOD_TRACKING_MS : STATE_PERIOD_IDLE_MS);
@@ -212,6 +230,12 @@ static void start_rotor(void)
     pluto_calibration_t cal;
     pan_tilt_config_t mount;
     servo_driver_config_t servos;
+    /* Kconfig is in degrees for whoever tunes it, the profile in centidegrees. */
+    const motion_profile_config_t motion = {
+        .v_max_cdeg_s = CONFIG_PLUTO_MOTION_MAX_SPEED_DEG_S * 100,
+        .a_max_cdeg_s2 = CONFIG_PLUTO_MOTION_MAX_ACCEL_DEG_S2 * 100,
+        .rest_after_ms = CONFIG_PLUTO_MOTION_REST_AFTER_MS,
+    };
 
     /* Cannot fail once config_store_init() has succeeded. */
     ESP_ERROR_CHECK(config_store_get_calibration(&cal));
@@ -248,7 +272,7 @@ static void start_rotor(void)
         ESP_LOGE(TAG, "Servos not started; tracking without moving the mount");
     }
 
-    rotor_init(&s_rotor, &mount, CONFIG_PLUTO_EXPIRED_POINT_TOLERANCE_MS);
+    rotor_init(&s_rotor, &mount, CONFIG_PLUTO_EXPIRED_POINT_TOLERANCE_MS, &motion);
     s_rotor_lock = xSemaphoreCreateMutex();
     configASSERT(s_rotor_lock != NULL);
     xTaskCreate(rotor_task, "rotor", 4096, NULL, 5, NULL);

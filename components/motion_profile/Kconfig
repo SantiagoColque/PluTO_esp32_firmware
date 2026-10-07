@@ -1,0 +1,44 @@
+menu "PluTO motion profile"
+
+    comment "Starting points: tune them on the bench with the antenna mounted."
+    comment "Compile-time constants, unlike the NVS seeds: change, rebuild, flash."
+
+    config PLUTO_MOTION_MAX_SPEED_DEG_S
+        int "Top speed of each servo axis (degrees per second)"
+        default 60
+        range 0 600
+        help
+            The fastest either axis is commanded to move (HU-36). 0 removes the
+            limit. Lower is gentler on the gears and the mount, but the pan
+            follows the azimuth, which turns at about 25 deg/s at the top of a
+            pass culminating at 88 degrees. Below about 20 the pan falls behind
+            there: test_a_high_pass_keeps_up in components/rotor/test_host
+            misses by 0.3 degrees at 20, 1.1 at 15 and 3.1 at 10, against 0.07
+            at this default. A flip swings the pan 180 degrees, which takes
+            about 3.5 s at 60.
+
+    config PLUTO_MOTION_MAX_ACCEL_DEG_S2
+        int "Top acceleration of each servo axis (degrees per second squared)"
+        default 120
+        range 0 5000
+        help
+            The fastest either axis speeds up or slows down, including the
+            braking after a HOLD (HU-36). This is what spares the gears the jerk
+            of a servo told to jump: at 120 an axis reaches 60 deg/s in half a
+            second and stops from it within 15 degrees. 0 removes the limit, so
+            the axis starts and stops at full speed. Too low and high passes
+            fall behind as well: the same test misses by 0.3 degrees at 30.
+
+    config PLUTO_MOTION_REST_AFTER_MS
+        int "Time still before the servo outputs can be released (ms)"
+        default 5000
+        range 0 3600000
+        help
+            Once both axes have stood still at the same target for this long,
+            the servo outputs can be released, and a new target brings them
+            back before the first move (HU-35). 0 never releases them. Whether
+            a DS3218 without pulses holds its position or sags under the
+            antenna is still to be measured on the bench; if the tilt sags,
+            lengthen this so it only acts between passes, or set it to 0.
+
+endmenu
