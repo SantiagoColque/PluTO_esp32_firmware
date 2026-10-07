@@ -1,0 +1,71 @@
+name: ci
+
+# Required status checks match on the job id, so the jobs below keep no `name:`
+# override: a ruleset on develop can require "host-tests" and "build" verbatim.
+# No `paths:` filter either, because a required check that never runs leaves the
+# PR waiting forever.
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a PR supersedes the run in progress. Runs on develop are never
+# cancelled, so every commit that lands there keeps its own verdict.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    # Explicit `bash` makes Actions run with -eo pipefail instead of plain -e.
+    shell: bash
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Do not set CFLAGS anywhere in this workflow: every test_host/Makefile
+      # assigns it with `?=`, so an inherited value would silently drop ASan and
+      # UBSan and the suites would still pass.
+      - name: Host test suites (ASan + UBSan)
+        run: |
+          cc --version | head -n 1
+
+          # Discovered rather than listed, so a component that adds a
+          # test_host/ on another branch is covered without touching this file.
+          shopt -s nullglob
+          suites=(components/*/test_host)
+          if [ "${#suites[@]}" -eq 0 ]; then
+            # An empty glob would otherwise pass without running anything.
+            echo "::error::no components/*/test_host directory found"
+            exit 1
+          fi
+
+          # Run every suite before failing, so one red PR shows all the
+          # broken components at once instead of only the first.
+          failed=()
+          for d in "${suites[@]}"; do
+            echo "::group::$d"
+            if ! make -C "$d"; then
+              failed+=("$d")
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ "${#failed[@]}" -ne 0 ]; then
+            for d in "${failed[@]}"; do
+              echo "::error::host tests failed in $d"
+            done
+            exit 1
+          fi
+          echo "${#suites[@]} host test suites passed"
