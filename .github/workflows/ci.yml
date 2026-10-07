@@ -14,11 +14,13 @@ on:
 permissions:
   contents: read
 
-# A new push to a PR supersedes the run in progress. Runs on develop are never
-# cancelled, so every commit that lands there keeps its own verdict.
+# A new push to a PR supersedes the run in progress. Pushes to develop and
+# manual runs get a group of their own (the run id): sharing one group would
+# still let Actions drop a queued run when a third one arrives, even with
+# cancel-in-progress off, and every commit on develop should keep its verdict.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 defaults:
   run:
