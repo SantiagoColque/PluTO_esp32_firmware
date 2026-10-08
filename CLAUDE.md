@@ -65,7 +65,8 @@ Each is a standard IDF component under `components/`, with its public API in
   `pluto_cal`, so that `config_store_factory_reset()`, which erases `pluto_cfg` to
   re-provision the WiFi, leaves it alone. It stores plain integers and checks nothing:
   `start_rotor()` checks the mount with `pan_tilt_config_valid()` and the driver checks
-  the pulses; if either is invalid the servos are not started.
+  the pulses; if either is invalid the servos are not started. `POST /api/calibration`
+  makes the same checks before saving.
 - **wifi_manager** — the state machine: `IDLE → CONNECTING → CONNECTED`, plus
   `PROVISIONING` (AP only, never configured) and `AP_FALLBACK` (AP up while the station
   keeps retrying). Reconnect backoff doubles from 1 s to `WIFI_RECONNECT_MAX_BACKOFF_SEC`
@@ -139,6 +140,8 @@ first-time setup there is no password to type yet.
 | `/api/factory-reset` | POST | erase the network and dashboard settings (`pluto_cfg`); the mount calibration stays |
 | `/logs` | GET | the log page (gzipped `logs.html`), linked from the Status card |
 | `/api/logs` | GET | the newest `CONFIG_PLUTO_LOG_RING_LINES` lines from `log_ring`, oldest first |
+| `/api/calibration` | GET | the stored mount calibration, keyed by the fields of `pluto_calibration_t` |
+| `/api/calibration` | POST | replace it: all nine fields, whole numbers, checked like at boot; applies at the next restart |
 
 The dashboard's default password is derived from the MAC: `pluto-xxxxxx`, logged at boot.
 
@@ -186,9 +189,10 @@ servos"* (`PLUTO_SERVO_*_US_AT_*`, in `components/servo/Kconfig`). All of it liv
 the `pluto_cal` namespace, which the dashboard's factory reset does not touch. What does
 erase it is wiping the whole NVS partition: `idf.py erase-flash`, or `init_nvs()` in
 `main.c` when NVS reports no free pages or a new version. The next boot seeds it again.
-Until the dashboard can edit it (card 4b), changing a stored calibration on a board means
-setting menuconfig and booting once with `CONFIG_PLUTO_FORCE_KCONFIG_SEED`, which
-re-seeds the network settings too.
+Once stored, it is edited from the dashboard's *Mount calibration* section
+(`/api/calibration`), in degrees and microseconds. It is not applied live: the rotor and
+the servo driver read it at boot, so it takes a restart, which the dashboard leaves to
+the user so that saving does not cut a pass short.
 
 The rest of the *"PluTO servos"* menu is compiled in, so a change there means
 reflashing: the signal pins (25 and 26, leaving 21/22 and 32/33 for the encoders' I2C)
@@ -258,12 +262,10 @@ server's encoder, which the decoder's host test must read back. After a change t
 
 Roughly in the order the SRS prioritizes them:
 
-- **Editing the calibration on a running board**: the mechanical limits (HU-07, which
-  RNF-07.1 puts in firmware), the north offset (HU-09 / RF-09.1) and the servo pulses are
-  stored and applied at boot, but nothing writes them after the seed. A setter with its
-  caller (the dashboard or a command) is card 4b; until then it takes a reflash with
-  `CONFIG_PLUTO_FORCE_KCONFIG_SEED`.
-- **Homing / zero calibration** (HU-28).
+- **Homing / zero calibration** (HU-28). With absolute encoders it is capturing an
+  offset, not searching for one, and it waits on the encoder driver. Also missing: the
+  MQTT command that triggers it (its topic is to be agreed in the server's contracts)
+  and a dashboard jog to move a servo by hand.
 - **Bench tuning of the motion profile**: the speed, acceleration and rest timeout are
   compile-time and shared by both axes, and the rest state cuts both outputs at once.
   Whether the DS3218 holds the tilt under the antenna without pulses, and so which
