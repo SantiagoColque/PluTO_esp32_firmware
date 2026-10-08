@@ -191,47 +191,21 @@ boot for development; it must never be enabled in a build that ships.
 Leaving `CONFIG_WIFI_SSID` empty is the intended production flow: the device starts
 unprovisioned and raises the setup portal. Setting it is a development shortcut.
 
-The mount's calibration follows the same seed rule, from two menus: `az_ref` and the
-joint limits from *"Mount calibration (first-boot seed)"* (`PLUTO_CAL_*`, in
-`main/Kconfig.projbuild`), and each servo's pulse at 0 and at 180 degrees from *"PluTO
-servos"* (`PLUTO_SERVO_*_US_AT_*`, in `components/servo/Kconfig`). All of it lives in
-the `pluto_cal` namespace, which the dashboard's factory reset does not touch. What does
-erase it is wiping the whole NVS partition: `idf.py erase-flash`, or `init_nvs()` in
-`main.c` when NVS reports no free pages or a new version. The next boot seeds it again.
-Once stored, it is edited from the dashboard's *Mount calibration* section
-(`/api/calibration`), in degrees, microseconds and encoder counts. It is not applied
-live: the rotor, the servo driver and the encoders read it at boot, so it takes a
-restart, which the dashboard leaves to the user so that saving does not cut a pass short.
-
-The rest of the *"PluTO servos"* menu is compiled in, so a change there means
-reflashing: the signal pins (25 and 26, leaving 21/22 and 32/33 for the encoders' I2C)
-and the DS3218 version (270 degrees by default, the narrow range, until the servos are
-identified). The version only sets the pulses' defaults: once `sdkconfig` exists,
-changing it leaves the pulses saved there alone.
-
-The *"PluTO motion profile"* menu (`components/motion_profile/Kconfig`) is compiled in
-the same way: top speed, acceleration and rest timeout, one set for both axes, in
-degrees; `start_rotor()` converts them to centidegrees.
-
-So is *"PluTO encoders"* (`components/encoder/Kconfig`): only `CONFIG_PLUTO_ENCODERS`,
-off by default. The I2C pins are fixed in `main.c` (pan on 21/22, tilt on 32/33). Each
-encoder's zero and direction are part of the stored calibration, with no menuconfig
-seed: they start at 0 and +1 and are set from the dashboard.
+The mount calibration (`az_ref`, the joint limits, each servo's pulses and each encoder's
+zero and direction) follows the same seed rule in its own namespace, `pluto_cal`, which
+the dashboard's factory reset keeps. Once stored, the dashboard edits it
+(`/api/calibration`) and it applies at the next restart. The servo pins and version, the
+motion profile and `CONFIG_PLUTO_ENCODERS` are compile-time; the encoders' I2C pins are
+fixed in `main.c`. Every option is in `README.md`, *Configuration*.
 
 ## Build and flash
 
-    idf.py set-target esp32
     idf.py menuconfig          # optional; seeds a blank NVS and sets the servo pins
     idf.py build
     idf.py -p /dev/ttyUSB0 flash monitor
 
-It needs ESP-IDF v5.5.x: `log_ring` checks `CONFIG_LOG_VERSION`, which older versions
-lack, and ESP-IDF 6 no longer ships the `json` and `mqtt` components that `web_server`
-and `mqtt_manager` require. Development uses v5.5.2.
-
-`README.md` is the deployment guide for people: flashing without ESP-IDF (the merged
-image, which also wipes NVS), provisioning, registering with the server, recovery and
-every menuconfig option. Keep it in step when one of those changes.
+The ESP-IDF version (v5.5.x) and the deployment steps are in `README.md`; keep it in
+step when flashing, provisioning, recovery or a menuconfig option changes.
 
 `sdkconfig` is not committed (`.gitignore` excludes it): each checkout generates its own
 from `sdkconfig.defaults`, which holds the choices that carry a reason:
