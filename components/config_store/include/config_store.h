@@ -73,18 +73,11 @@ esp_err_t config_store_factory_reset(void);
  *
  * config_store_init() loads it: from NVS when it holds one, otherwise from the
  * menuconfig seed (PLUTO_CAL_* for the mount, PLUTO_SERVO_*_US_AT_* for the
- * pulses), which is then written to NVS. It is not range-checked here; check
- * it with pan_tilt_config_valid() and servo_calibration_valid() before using it.
+ * pulses), which is then written to NVS. It is not range-checked here: check
+ * the mount with pan_tilt_config_valid(), and servo_driver_init() checks the
+ * pulses.
  */
 esp_err_t config_store_get_calibration(pluto_calibration_t *out);
-
-/**
- * @brief Store the mount's calibration in NVS and in the RAM copy.
- *
- * Stores whatever it is given: validate first. The rotor copies the
- * calibration once when it starts, so a new one applies after a restart.
- */
-esp_err_t config_store_set_calibration(const pluto_calibration_t *in);
 
 /**
  * @brief Borrow the RAM cache instead of copying it.

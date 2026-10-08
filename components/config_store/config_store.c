@@ -40,11 +40,7 @@
  * The next boot then seeds it from menuconfig again, like the rest.
  */
 #define CALIBRATION_NAMESPACE "pluto_cal"
-/* Bump only when the meaning of a stored key changes. Adding a key does not
- * need it: a missing key keeps its seed value, as in pluto_cfg. */
-#define CALIBRATION_FORMAT_VERSION 1
 
-#define KEY_CAL_VERSION "cal_ver"
 #define KEY_CAL_AZ_REF "az_ref"
 #define KEY_CAL_PAN_MIN "pan_min"
 #define KEY_CAL_PAN_MAX "pan_max"
@@ -58,7 +54,7 @@
 static const char *TAG = "config_store";
 
 static pluto_config_t s_cache;
-/* Guarded by s_mutex, like s_cache. */
+/* Written only by config_store_init(), so readers need no lock. */
 static pluto_calibration_t s_calibration;
 static SemaphoreHandle_t s_mutex;
 static bool s_initialized;
@@ -137,12 +133,8 @@ static void apply_calibration_seed(pluto_calibration_t *cal)
     cal->tilt_us_at_180 = CONFIG_PLUTO_SERVO_TILT_US_AT_180;
 }
 
-/*
- * One key per field, like pluto_cfg, so a field added later loads on a device
- * that never stored it, without a migration. The price is that a power cut
- * between two writes can leave old and new values mixed; the range check before
- * the rotor uses them still applies, and saving again fixes it.
- */
+/* One key per field, like pluto_cfg, so a field added later loads on a device
+ * that never stored it (it keeps its seed), without a migration. */
 static esp_err_t write_calibration(nvs_handle_t handle, const pluto_calibration_t *cal)
 {
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_AZ_REF, cal->az_ref_cdeg), TAG, "az_ref");
@@ -154,7 +146,6 @@ static esp_err_t write_calibration(nvs_handle_t handle, const pluto_calibration_
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_US_AT_180, cal->pan_us_at_180), TAG, "pan_us180");
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_US_AT_0, cal->tilt_us_at_0), TAG, "tilt_us0");
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_US_AT_180, cal->tilt_us_at_180), TAG, "tilt_us180");
-    ESP_RETURN_ON_ERROR(nvs_set_u8(handle, KEY_CAL_VERSION, CALIBRATION_FORMAT_VERSION), TAG, "cal_ver");
 
     return nvs_commit(handle);
 }
@@ -177,9 +168,9 @@ static void load_i32(nvs_handle_t handle, const char *key, int32_t *dest)
 static esp_err_t load_calibration(pluto_calibration_t *cal)
 {
     nvs_handle_t handle;
-    uint8_t version = 0;
+    int32_t probe;
     bool seed_needed;
-    esp_err_t err;
+    esp_err_t err = ESP_OK;
 
     apply_calibration_seed(cal);
 
@@ -187,8 +178,7 @@ static esp_err_t load_calibration(pluto_calibration_t *cal)
                         TAG,
                         "Unable to open the calibration namespace");
 
-    err = nvs_get_u8(handle, KEY_CAL_VERSION, &version);
-    seed_needed = (err == ESP_ERR_NVS_NOT_FOUND);
+    seed_needed = nvs_get_i32(handle, KEY_CAL_AZ_REF, &probe) == ESP_ERR_NVS_NOT_FOUND;
 
 #if CONFIG_PLUTO_FORCE_KCONFIG_SEED
     if (!seed_needed) {
@@ -200,14 +190,7 @@ static esp_err_t load_calibration(pluto_calibration_t *cal)
     if (seed_needed) {
         ESP_LOGI(TAG, "Seeding the mount calibration from menuconfig");
         err = write_calibration(handle, cal);
-    } else if (err == ESP_OK && version != CALIBRATION_FORMAT_VERSION) {
-        /* Written by a firmware with another format, most likely a newer one
-         * before a downgrade. Its keys may mean something else, so none is
-         * read, and NVS is left as it is so that firmware finds it again. */
-        ESP_LOGW(TAG, "Stored calibration has format %u, this firmware reads %d",
-                 (unsigned)version, CALIBRATION_FORMAT_VERSION);
-        err = ESP_ERR_NOT_SUPPORTED;
-    } else if (err == ESP_OK) {
+    } else {
         load_i32(handle, KEY_CAL_AZ_REF, &cal->az_ref_cdeg);
         load_i32(handle, KEY_CAL_PAN_MIN, &cal->pan_min_cdeg);
         load_i32(handle, KEY_CAL_PAN_MAX, &cal->pan_max_cdeg);
@@ -464,54 +447,8 @@ esp_err_t config_store_get_calibration(pluto_calibration_t *out)
         return ESP_ERR_INVALID_STATE;
     }
 
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
     *out = s_calibration;
-    xSemaphoreGive(s_mutex);
-
     return ESP_OK;
-}
-
-esp_err_t config_store_set_calibration(const pluto_calibration_t *in)
-{
-    nvs_handle_t handle;
-    esp_err_t err;
-
-    if (in == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (!s_initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    ESP_RETURN_ON_ERROR(nvs_open(CALIBRATION_NAMESPACE, NVS_READWRITE, &handle), TAG, "nvs_open");
-
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    err = write_calibration(handle, in);
-    if (err == ESP_OK) {
-        s_calibration = *in;
-    }
-    xSemaphoreGive(s_mutex);
-
-    nvs_close(handle);
-
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "Mount calibration saved: az_ref=%ld pan=%ld..%ld tilt=%ld..%ld cdeg, "
-                      "pulses pan=%ld..%ld tilt=%ld..%ld us",
-                 (long)in->az_ref_cdeg,
-                 (long)in->pan_min_cdeg,
-                 (long)in->pan_max_cdeg,
-                 (long)in->tilt_min_cdeg,
-                 (long)in->tilt_max_cdeg,
-                 (long)in->pan_us_at_0,
-                 (long)in->pan_us_at_180,
-                 (long)in->tilt_us_at_0,
-                 (long)in->tilt_us_at_180);
-    } else {
-        ESP_LOGE(TAG, "Unable to save the mount calibration: %s", esp_err_to_name(err));
-    }
-
-    return err;
 }
 
 esp_err_t config_store_factory_reset(void)

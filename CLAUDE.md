@@ -242,9 +242,9 @@ Roughly in the order the SRS prioritizes them:
 
 - **Editing the calibration on a running board**: the mechanical limits (HU-07, which
   RNF-07.1 puts in firmware), the north offset (HU-09 / RF-09.1) and the servo pulses are
-  stored and applied at boot, but `config_store_set_calibration()` has no caller yet. The
-  dashboard or a command for it is card 4b; until then it takes a reflash with
-  `CONFIG_PLUTO_FORCE_KCONFIG_SEED`, and a new calibration applies on the next boot.
+  stored and applied at boot, but nothing writes them after the seed. A setter with its
+  caller (the dashboard or a command) is card 4b; until then it takes a reflash with
+  `CONFIG_PLUTO_FORCE_KCONFIG_SEED`.
 - **Homing / zero calibration** (HU-28).
 - **Speed and acceleration limiting** (HU-36) and the rest state (HU-35). Poses go to
   the servos as computed, so a change of pan-tilt mode turns the pan 180 degrees at the
