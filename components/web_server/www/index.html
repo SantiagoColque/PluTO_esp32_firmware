@@ -39,6 +39,9 @@ button.danger{background:transparent;color:var(--err);border:1px solid var(--lin
 .scanrow{display:flex;gap:8px;align-items:flex-end}
 .scanrow>div{flex:1;min-width:0}
 .scanrow button{width:auto;margin:0;padding:9px 14px;white-space:nowrap}
+.pair{display:flex;gap:10px}
+.pair>div{flex:1;min-width:0}
+#calmsg{margin:14px 0 0}
 details{margin-top:4px}
 summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0}
 </style>
@@ -121,6 +124,41 @@ summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0}
   </form>
 
   <details>
+    <summary>Mount calibration</summary>
+    <!-- data-scale: the API takes these in hundredths of a degree. -->
+    <form class="card" id="cal">
+      <h2>Calibration</h2>
+      <div class="field">
+        <label for="az_ref">Mount heading, az_ref (°)</label>
+        <input id="az_ref" name="az_ref_cdeg" data-scale="100" type="number" min="0" max="359.99" step="0.01" required>
+        <div class="hint">Geographic azimuth the antenna faces with the pan at 0°, clockwise from north.</div>
+      </div>
+      <div class="pair">
+        <div><label for="pan_min">Pan min (°)</label><input id="pan_min" name="pan_min_cdeg" data-scale="100" type="number" min="0" max="180" step="0.01" required></div>
+        <div><label for="pan_max">Pan max (°)</label><input id="pan_max" name="pan_max_cdeg" data-scale="100" type="number" min="0" max="180" step="0.01" required></div>
+      </div>
+      <div class="pair">
+        <div><label for="tilt_min">Tilt min (°)</label><input id="tilt_min" name="tilt_min_cdeg" data-scale="100" type="number" min="0" max="180" step="0.01" required></div>
+        <div><label for="tilt_max">Tilt max (°)</label><input id="tilt_max" name="tilt_max_cdeg" data-scale="100" type="number" min="0" max="180" step="0.01" required></div>
+      </div>
+      <div class="hint">The range each joint may use, min below max. Tilt 0° is the horizon ahead and 180° the horizon behind.</div>
+      <div class="pair">
+        <div><label for="pan_us0">Pan pulse at 0° (µs)</label><input id="pan_us0" name="pan_us_at_0" type="number" min="500" max="2500" step="1" required></div>
+        <div><label for="pan_us180">Pan pulse at 180° (µs)</label><input id="pan_us180" name="pan_us_at_180" type="number" min="500" max="2500" step="1" required></div>
+      </div>
+      <div class="pair">
+        <div><label for="tilt_us0">Tilt pulse at 0° (µs)</label><input id="tilt_us0" name="tilt_us_at_0" type="number" min="500" max="2500" step="1" required></div>
+        <div><label for="tilt_us180">Tilt pulse at 180° (µs)</label><input id="tilt_us180" name="tilt_us_at_180" type="number" min="500" max="2500" step="1" required></div>
+      </div>
+      <div class="hint">The pulse that puts each servo at 0° and the one that puts it at 180°, different and within 500–2500 µs.</div>
+      <div class="msg" id="calmsg"></div>
+      <button type="submit" id="calsave">Save calibration</button>
+      <button type="button" class="ghost" id="calreboot">Restart to apply</button>
+      <div class="hint">Saved values take effect after a restart, which stops any pass in progress.</div>
+    </form>
+  </details>
+
+  <details>
     <summary>Administration</summary>
     <div class="card">
       <h2>Dashboard access</h2>
@@ -145,8 +183,8 @@ summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0}
 var $ = function (id) { return document.getElementById(id); };
 var portal = false, polling = null;
 
-function msg(text, kind) {
-  var m = $('msg');
+function msg(text, kind, id) {
+  var m = $(id || 'msg');
   m.textContent = text;
   m.className = 'msg show ' + (kind || 'ok');
 }
@@ -281,11 +319,43 @@ $('setpass').addEventListener('click', function () {
   }).catch(function () { msg('Could not change the password.', 'err'); });
 });
 
-$('reboot').addEventListener('click', function () {
+function loadCalibration() {
+  fetch('api/calibration').then(function (r) { return r.json(); }).then(function (c) {
+    Array.prototype.forEach.call($('cal').elements, function (el) {
+      if (el.name in c) el.value = c[el.name] / (el.dataset.scale || 1);
+    });
+  }).catch(function () {});
+}
+
+$('cal').addEventListener('submit', function (e) {
+  e.preventDefault();
+  var body = {};
+  Array.prototype.forEach.call(e.target.elements, function (el) {
+    if (el.name) body[el.name] = Math.round(el.value * (el.dataset.scale || 1));
+  });
+
+  $('calsave').disabled = true;
+  fetch('api/calibration', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function (r) {
+    // Errors come back as plain text, not JSON.
+    if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
+    msg('Calibration saved. Restart the device to apply it.', 'ok', 'calmsg');
+  }).catch(function (err) {
+    msg('Could not save: ' + err.message, 'err', 'calmsg');
+  }).then(function () { $('calsave').disabled = false; });
+});
+
+function restart() {
   if (!confirm('Restart the device?')) return;
   fetch('api/reboot', { method: 'POST' }).then(function (r) { return r.json(); })
     .then(function (d) { countdown(d.restart_ms, 'Restart requested.'); });
-});
+}
+
+$('reboot').addEventListener('click', restart);
+$('calreboot').addEventListener('click', restart);
 
 $('reset').addEventListener('click', function () {
   if (!confirm('Erase the network settings and the dashboard password? The mount calibration is kept.')) return;
@@ -294,6 +364,7 @@ $('reset').addEventListener('click', function () {
 });
 
 refresh().then(function () { if (portal) scan(); });
+loadCalibration();
 polling = setInterval(refresh, 4000);
 </script>
 </body>
