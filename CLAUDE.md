@@ -169,8 +169,7 @@ The dashboard's default password is derived from the MAC: `pluto-xxxxxx`, logged
 The contracts live in the PluTO repo, under `docs/contracts/`: `coordinates-dto.md` for
 the batch (a packed little-endian list of az/el setpoints, each carrying the instant it
 must be reached, at `19 + 8*count` bytes) and `device-state.md` for `status` and
-`state`. Read them before touching either side. `docs/contract/coordinates-dto.md` in
-this repo is an older copy from before the decoder existed; do not go by it.
+`state`. Read them before touching either side.
 
 On the server, `mqtt_dispatch` bridges `plugin/<uuid>/coordinates/polar` to the device
 topic, and the ingest registers a board from its first `status` or `state`. It rejects
