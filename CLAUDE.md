@@ -266,6 +266,7 @@ Roughly in the order the SRS prioritizes them:
 - **Telemetry of actual position on hardware** (HU-24, HU-29): `meas` and `err_cdeg` are
   implemented behind `CONFIG_PLUTO_ENCODERS`, but the chip is unconfirmed, the encoders
   are not mounted and their zero is typed in by hand (homing above).
-- **Elevation threshold** (HU-30).
+- **Elevation threshold** (HU-30): not for the firmware. The server cuts the trajectory
+  below `Rotor.min_elevation_deg`; the board only enforces the mount limits.
 - **OTA updates** (HU-32) — the partition table has a single `factory` app slot, so
   adding OTA means changing it.
