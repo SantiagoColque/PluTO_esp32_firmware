@@ -41,6 +41,8 @@ size_t trajectory_load(trajectory_t *traj,
                        int64_t tolerance_ms)
 {
     size_t first_kept = 0;
+    size_t old_kept = 0;
+    size_t new_count;
 
     if (count == 0 || count > TRAJECTORY_MAX_POINTS) {
         return 0;
@@ -59,9 +61,25 @@ size_t trajectory_load(trajectory_t *traj,
         return 0;
     }
 
-    traj->count = count - first_kept;
-    memcpy(traj->points, points + first_kept, traj->count * sizeof(traj->points[0]));
-    return traj->count;
+    /* The batch arrives about 2 s before its first point (§10), so what is
+     * pending until then stays, or the target would jump ahead. Strictly
+     * before, so no two points share an instant. */
+    while (old_kept < traj->count && traj->points[old_kept].t_ms < points[0].t_ms) {
+        old_kept++;
+    }
+    new_count = count - first_kept;
+
+    /* Out of room, the oldest go first: those are the ones already passed. */
+    if (old_kept + new_count > TRAJECTORY_MAX_POINTS) {
+        size_t dropped = old_kept + new_count - TRAJECTORY_MAX_POINTS;
+
+        old_kept -= dropped;
+        memmove(traj->points, traj->points + dropped, old_kept * sizeof(traj->points[0]));
+    }
+
+    memcpy(traj->points + old_kept, points + first_kept, new_count * sizeof(traj->points[0]));
+    traj->count = old_kept + new_count;
+    return new_count;
 }
 
 void trajectory_clear(trajectory_t *traj)

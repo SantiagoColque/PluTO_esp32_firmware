@@ -9,7 +9,8 @@
  * What the board does between messages, as defined in PluTO's
  * docs/contracts/coordinates-dto.md §6.3, §6.6 and §6.7:
  *
- * - a new batch replaces the pending points instead of merging with them;
+ * - a new batch replaces the pending points from its first instant on, and
+ *   the earlier ones stay, as the server's merge_trajectory does;
  * - before the first point the target is the first point;
  * - between two points the target is interpolated linearly in time, with the
  *   azimuth taking the shortest way around;
@@ -37,14 +38,18 @@ typedef struct {
 void trajectory_init(trajectory_t *traj);
 
 /**
- * @brief Replace whatever is pending with a new batch (§6.7).
+ * @brief Load a new batch (§6.7).
+ *
+ * It replaces the pending points from its first instant on; the earlier ones
+ * stay, so the target keeps following them until the batch starts. Without
+ * room for all, the oldest pending points go, never the batch's.
  *
  * Points more than tolerance_ms in the past are dropped (§6.3). Returns how
- * many points were kept. 0 means the batch is discarded and the current
- * trajectory is left untouched. That happens when every point had expired,
- * when there are more than TRAJECTORY_MAX_POINTS, or when the points are not
- * in strictly increasing time order. The decoder already guarantees the
- * order (§6.5); checking it again here keeps the interpolation from ever
+ * many of the batch's points were kept. 0 means the batch is discarded and
+ * the current trajectory is left untouched. That happens when every point had
+ * expired, when there are more than TRAJECTORY_MAX_POINTS, or when the points
+ * are not in strictly increasing time order. The decoder already guarantees
+ * the order (§6.5); checking it again here keeps the interpolation from ever
  * dividing by zero.
  */
 size_t trajectory_load(trajectory_t *traj,
