@@ -327,6 +327,35 @@ static void test_a_hold_brakes_along_a_ramp(void)
     CHECK(!rotor_tick(&rotor, now + 10000, TICK_MS));
 }
 
+/* main's tick is not steady, and one late tick while braking carries an axis
+ * a little past its target. Wherever that tick falls, the commanded pose
+ * stays inside the mount. */
+static void test_a_late_tick_never_leaves_the_mount(void)
+{
+    const pan_tilt_config_t mount = {0, 0, 12000, 0, 18000};
+
+    for (int late = 0; late < 60; late++) {
+        rotor_t rotor;
+        int64_t now = T0;
+        int32_t max_pan = 0;
+
+        rotor_init(&rotor, &mount, TOLERANCE_MS, &LIMITS);
+        send_point(&rotor, 0, 3000, now, now);
+        send_point(&rotor, 12000, 3000, now, now);
+        for (int i = 0; i < 100; i++) {
+            int32_t dt = i == late ? 2 * TICK_MS : TICK_MS;
+
+            now += dt;
+            rotor_tick(&rotor, now, dt);
+            if (rotor.pose.pan_cdeg > max_pan) {
+                max_pan = rotor.pose.pan_cdeg;
+            }
+        }
+        CHECK(max_pan <= mount.pan_max_cdeg);
+        CHECK(rotor.pose.pan_cdeg == 12000);
+    }
+}
+
 static void test_holding_waits_for_the_servos_to_arrive(void)
 {
     rotor_t rotor;
@@ -596,6 +625,7 @@ int main(void)
     test_the_mount_decides_what_is_reachable();
     test_a_payload_only_moves_the_target();
     test_a_hold_brakes_along_a_ramp();
+    test_a_late_tick_never_leaves_the_mount();
     test_holding_waits_for_the_servos_to_arrive();
     test_the_hysteresis_follows_the_target_not_the_servos();
     test_a_flip_reports_where_the_servos_point();

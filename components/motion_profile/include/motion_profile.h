@@ -8,17 +8,13 @@
  * Speed and acceleration limits for one servo axis (HU-36), and when that axis
  * has stood still long enough for its output to be released (HU-35).
  *
- * It works in servo space, in centidegrees, after pan_tilt has chosen the mode.
- * There each axis lives in its own interval with no wraparound, so the 180
- * degree swing of a flip is a ramp like any other and the axis never leaves
- * the range on the way: a fixed target is approached along a braking curve
- * that ends on it, and a target that moves back toward the axis is overshot
- * by at most the distance needed to stop, which stays short of the previous
- * target.
+ * It works in servo space, in centidegrees, after pan_tilt has chosen the mode,
+ * so the 180-degree swing of a flip is a ramp like any other. With a steady
+ * tick a fixed target is reached without overshoot; a longer tick while
+ * braking can pass it slightly, so rotor clamps the result to the mount.
  *
- * Elapsed time is an argument, never read here, so the logic runs as a host
- * test (test_host/). It has to come from a monotonic clock: the wall clock is
- * stepped by SNTP, and a jump would read as a long step or a negative one.
+ * Elapsed time is an argument and must come from a monotonic clock: SNTP steps
+ * the wall clock.
  */
 
 /*

@@ -85,6 +85,11 @@ bool rotor_handle_payload(rotor_t *rotor,
     return true;
 }
 
+static int32_t clamp(int32_t value, int32_t min, int32_t max)
+{
+    return value < min ? min : value > max ? max : value;
+}
+
 /* Copies the profiled angles into the commanded pose. Returns true if they changed. */
 static bool update_pose(rotor_t *rotor)
 {
@@ -95,8 +100,11 @@ static bool update_pose(rotor_t *rotor)
         return false;
     }
 
-    pose.pan_cdeg = motion_profile_position(&rotor->pan_axis);
-    pose.tilt_cdeg = motion_profile_position(&rotor->tilt_axis);
+    /* A late tick can carry an axis a little past its target; never past the mount. */
+    pose.pan_cdeg = clamp(motion_profile_position(&rotor->pan_axis), rotor->mount.pan_min_cdeg,
+                          rotor->mount.pan_max_cdeg);
+    pose.tilt_cdeg = clamp(motion_profile_position(&rotor->tilt_axis), rotor->mount.tilt_min_cdeg,
+                           rotor->mount.tilt_max_cdeg);
     /* Halfway through a flip the tilt can still be on the old side of the
      * zenith: the pose takes the mode it is physically in, with the target's
      * as the tie-break on the zenith itself. */

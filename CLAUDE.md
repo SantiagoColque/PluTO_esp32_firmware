@@ -114,8 +114,9 @@ The pointing pipeline is split the same way: pure components with host tests
   the zenith for the back half of the sky (`coordinates-dto.md` §9). Kinematics only:
   trims and pulses belong to `servo`.
 - **motion_profile** — per axis, in servo space: limits speed and acceleration (HU-36)
-  along a braking curve worked out step by step, so it stops on a fixed target without
-  overshooting, brakes at the acceleration limit after a `HOLD`, and tells when an axis
+  along a braking curve worked out step by step (with a steady tick it does not overshoot
+  a fixed target; `rotor` clamps to the mount), brakes at the acceleration limit after a
+  `HOLD`, and tells when an axis
   has stood still at the same target for `rest_after_ms` (HU-35). Elapsed time is an
   argument. With no position known (no encoders yet) the first target is taken as is.
 - **rotor** — the board's side of both contracts. Takes payloads, applies the rules that
