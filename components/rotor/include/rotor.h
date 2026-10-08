@@ -53,6 +53,8 @@ typedef struct {
     pan_tilt_pose_t target; /* where the trajectory points now; its mode is the hysteresis state */
     bool has_pose;
     pan_tilt_pose_t pose; /* last servo angles commanded, after the profile; its mode is physical */
+    bool has_measured;
+    pan_tilt_pose_t measured; /* servo angles the encoders read, from rotor_set_measured() */
     rotor_mode_t mode;
     rotor_batch_report_t last_batch;
     uint32_t rejected_total;
@@ -94,6 +96,15 @@ bool rotor_handle_payload(rotor_t *rotor,
  * Returns true when this call changed the commanded angles.
  */
 bool rotor_tick(rotor_t *rotor, int64_t now_ms, int32_t dt_ms);
+
+/**
+ * @brief Hand in the servo angles the encoders read this tick.
+ *
+ * valid is false when there is no reading; the state then reports meas and
+ * err_cdeg as null (device-state.md §3). Telemetry only: the servos are still
+ * commanded from the trajectory alone.
+ */
+void rotor_set_measured(rotor_t *rotor, bool valid, int32_t pan_cdeg, int32_t tilt_cdeg);
 
 /**
  * @brief Whether the servo outputs can be released (HU-35).

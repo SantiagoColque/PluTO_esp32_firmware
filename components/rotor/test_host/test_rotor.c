@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "rotor.h"
@@ -83,8 +84,8 @@ static void test_a_fresh_rotor_reports_idle(void)
     CHECK(rotor_state_json(&rotor, 1000, true, json, sizeof(json)) > 0);
     CHECK(strcmp(json,
                  "{\"v\":1,\"ts_ms\":1000,\"clock_synced\":true,\"mode\":\"idle\","
-                 "\"az_cdeg\":null,\"el_cdeg\":null,\"pan_mode\":null,\"batch\":null,"
-                 "\"rejected_total\":0}") == 0);
+                 "\"az_cdeg\":null,\"el_cdeg\":null,\"pan_mode\":null,\"meas\":null,\"err_cdeg\":null,"
+                 "\"batch\":null,\"rejected_total\":0}") == 0);
 }
 
 static void test_an_accepted_batch_starts_tracking(void)
@@ -103,7 +104,7 @@ static void test_an_accepted_batch_starts_tracking(void)
     CHECK(rotor_state_json(&rotor, T0 - 1860, true, json, sizeof(json)) > 0);
     CHECK(strcmp(json,
                  "{\"v\":1,\"ts_ms\":1789763398140,\"clock_synced\":true,\"mode\":\"tracking\","
-                 "\"az_cdeg\":4500,\"el_cdeg\":1000,\"pan_mode\":\"normal\","
+                 "\"az_cdeg\":4500,\"el_cdeg\":1000,\"pan_mode\":\"normal\",\"meas\":null,\"err_cdeg\":null,"
                  "\"batch\":{\"t_sent_ms\":1789763398000,\"received_ms\":1789763398140,"
                  "\"latency_ms\":140,\"accepted\":true,\"error\":null},\"rejected_total\":0}") == 0);
 }
@@ -571,6 +572,76 @@ static void test_a_high_pass_keeps_up(void)
     CHECK(worst_error_on_a_high_pass(&too_slow) > 1.0);
 }
 
+static void test_the_state_reports_the_measured_position(void)
+{
+    rotor_t rotor;
+    char json[ROTOR_STATE_JSON_MAX];
+
+    new_rotor(&rotor);
+    /* Due west at 30 degrees: flipped, pan 90 and tilt 150. */
+    send_point(&rotor, 27000, 3000, T0, T0);
+    rotor_set_measured(&rotor, true, 9050, 15000);
+    rotor_tick(&rotor, T0 + TICK_MS, TICK_MS);
+
+    /* The commanded position keeps its fields; the measured one goes apart,
+     * 0.5 degrees of azimuth off, which at 30 degrees up is 0.43 on the sky. */
+    CHECK(rotor_state_json(&rotor, T0 + TICK_MS, true, json, sizeof(json)) > 0);
+    CHECK(strstr(json, "\"az_cdeg\":27000,\"el_cdeg\":3000,\"pan_mode\":\"flipped\","
+                       "\"meas\":{\"az_cdeg\":27050,\"el_cdeg\":3000},\"err_cdeg\":43,") != NULL);
+}
+
+static int32_t error_after(uint16_t target_az, int16_t target_el, int32_t pan_cdeg, int32_t tilt_cdeg)
+{
+    rotor_t rotor;
+    char json[ROTOR_STATE_JSON_MAX];
+    const char *err;
+
+    new_rotor(&rotor);
+    send_point(&rotor, target_az, target_el, T0, T0);
+    rotor_set_measured(&rotor, true, pan_cdeg, tilt_cdeg);
+    rotor_state_json(&rotor, T0, true, json, sizeof(json));
+    err = strstr(json, "\"err_cdeg\":");
+    return err != NULL ? (int32_t)atoi(err + strlen("\"err_cdeg\":")) : -1;
+}
+
+/* The examples of device-state.md §4.2. */
+static void test_the_error_is_the_angle_on_the_sky(void)
+{
+    /* 359.90 against 0.10 at 30 degrees: no jump across north. */
+    CHECK(error_after(35990, 3000, 10, 3000) == 17);
+    /* Azimuth 0 against 180 at 89.5 degrees is one degree, not 180. */
+    CHECK(error_after(0, 8950, 18000, 8950) == 100);
+    /* Opposite directions, where rounding could take asin() past its domain. */
+    CHECK(error_after(0, 0, 18000, 0) == 18000);
+}
+
+static void test_no_reading_or_no_target_means_no_error(void)
+{
+    rotor_t rotor;
+    char json[ROTOR_STATE_JSON_MAX];
+
+    new_rotor(&rotor);
+    /* The encoders know where the antenna is from boot, before any batch. */
+    rotor_set_measured(&rotor, true, 4500, 1000);
+    rotor_state_json(&rotor, T0, true, json, sizeof(json));
+    CHECK(strstr(json, "\"meas\":{\"az_cdeg\":4500,\"el_cdeg\":1000},\"err_cdeg\":null,") != NULL);
+
+    send_point(&rotor, 4500, 1000, T0, T0);
+    rotor_state_json(&rotor, T0, true, json, sizeof(json));
+    CHECK(strstr(json, "\"err_cdeg\":0,") != NULL);
+
+    /* A HOLD drops the target. */
+    send_hold(&rotor, T0);
+    rotor_state_json(&rotor, T0, true, json, sizeof(json));
+    CHECK(strstr(json, "\"meas\":{\"az_cdeg\":4500,\"el_cdeg\":1000},\"err_cdeg\":null,") != NULL);
+
+    /* A tick without a reading reports none, whatever was read before. */
+    send_point(&rotor, 4500, 1000, T0, T0);
+    rotor_set_measured(&rotor, false, 0, 0);
+    rotor_state_json(&rotor, T0, true, json, sizeof(json));
+    CHECK(strstr(json, "\"meas\":null,\"err_cdeg\":null,") != NULL);
+}
+
 static void test_the_json_refuses_a_short_buffer(void)
 {
     rotor_t rotor;
@@ -588,11 +659,18 @@ static void test_the_longest_state_fits(void)
     new_rotor(&rotor);
     rotor.mode = ROTOR_MODE_TRACKING;
     rotor.has_pose = true;
-    rotor.pose = (pan_tilt_pose_t){17999, 18000, PAN_TILT_FLIPPED};
+    rotor.pose = (pan_tilt_pose_t){17999, 9001, PAN_TILT_FLIPPED}; /* az 35999, el 8999 */
     rotor.rejected_total = UINT32_MAX;
     rotor.last_batch = (rotor_batch_report_t){true, true, INT64_MIN, INT64_MIN, true, INT64_MIN, false, "clock_not_synced"};
+    /* Measured at az 359.99 and el -90, as far as an encoder can read, against
+     * a target at the zenith: five digits everywhere. */
+    rotor_set_measured(&rotor, true, -1, -9000);
+    rotor.has_target = true;
+    rotor.target = (pan_tilt_pose_t){0, 9000, PAN_TILT_NORMAL};
+    rotor.trajectory.count = 1;
 
     CHECK(rotor_state_json(&rotor, INT64_MIN, false, json, sizeof(json)) > 0);
+    CHECK(strstr(json, "\"meas\":{\"az_cdeg\":35999,\"el_cdeg\":-9000},\"err_cdeg\":18000,") != NULL);
 }
 
 int main(void)
@@ -615,6 +693,9 @@ int main(void)
     test_the_outputs_rest_and_wake();
     test_only_something_to_do_wakes_the_outputs();
     test_a_high_pass_keeps_up();
+    test_the_state_reports_the_measured_position();
+    test_the_error_is_the_angle_on_the_sky();
+    test_no_reading_or_no_target_means_no_error();
     test_the_json_refuses_a_short_buffer();
     test_the_longest_state_fits();
 

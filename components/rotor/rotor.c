@@ -1,6 +1,7 @@
 #include "rotor.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -163,6 +164,13 @@ bool rotor_tick(rotor_t *rotor, int64_t now_ms, int32_t dt_ms)
     return changed;
 }
 
+void rotor_set_measured(rotor_t *rotor, bool valid, int32_t pan_cdeg, int32_t tilt_cdeg)
+{
+    rotor->has_measured = valid;
+    /* pan_tilt_to_azel() goes by the tilt; the label only settles the zenith. */
+    rotor->measured = (pan_tilt_pose_t){pan_cdeg, tilt_cdeg, PAN_TILT_NORMAL};
+}
+
 bool rotor_outputs_resting(const rotor_t *rotor)
 {
     return !rotor->has_pose ||
@@ -209,11 +217,50 @@ static int write_batch_json(const rotor_batch_report_t *report, char *buf, size_
                     error);
 }
 
+/* The angle on the sky between two directions (device-state.md §4.2), which
+ * unlike an azimuth difference neither jumps at north nor blows up near the
+ * zenith. */
+static int32_t angle_between_cdeg(int32_t az1, int32_t el1, int32_t az2, int32_t el2)
+{
+    const double rad = M_PI / 18000.0;
+    double sin_el = sin((el2 - el1) * rad / 2.0);
+    double sin_az = sin((az2 - az1) * rad / 2.0);
+    double h = sin_el * sin_el + cos(el1 * rad) * cos(el2 * rad) * sin_az * sin_az;
+
+    /* Rounding can leave h a hair above 1 for opposite directions, past asin()'s domain. */
+    return (int32_t)lround(2.0 * asin(sqrt(fmin(h, 1.0))) / rad);
+}
+
+/* Writes meas and err_cdeg; both stay null without a reading. */
+static void write_measured_json(const rotor_t *rotor, char *meas, size_t meas_len, char *err, size_t err_len)
+{
+    int32_t meas_az;
+    int32_t meas_el;
+    int32_t target_az;
+    int32_t target_el;
+
+    if (!rotor->has_measured) {
+        return;
+    }
+    pan_tilt_to_azel(&rotor->mount, &rotor->measured, &meas_az, &meas_el);
+    snprintf(meas, meas_len, "{\"az_cdeg\":%" PRId32 ",\"el_cdeg\":%" PRId32 "}", meas_az, meas_el);
+
+    /* Against the target rather than the commanded pose, which lags it on
+     * purpose under the motion profile. A HOLD empties the trajectory, and
+     * with it the target. */
+    if (rotor->has_target && rotor->trajectory.count > 0) {
+        pan_tilt_to_azel(&rotor->mount, &rotor->target, &target_az, &target_el);
+        snprintf(err, err_len, "%" PRId32, angle_between_cdeg(meas_az, meas_el, target_az, target_el));
+    }
+}
+
 int rotor_state_json(const rotor_t *rotor, int64_t now_ms, bool clock_synced, char *buf, size_t buf_len)
 {
     char az[16] = "null";
     char el[16] = "null";
     const char *pan_mode = "null";
+    char meas[64] = "null";
+    char err[16] = "null";
     char batch[192] = "null";
     int written;
 
@@ -226,6 +273,7 @@ int rotor_state_json(const rotor_t *rotor, int64_t now_ms, bool clock_synced, ch
         snprintf(el, sizeof(el), "%" PRId32, el_cdeg);
         pan_mode = rotor->pose.mode == PAN_TILT_FLIPPED ? "\"flipped\"" : "\"normal\"";
     }
+    write_measured_json(rotor, meas, sizeof(meas), err, sizeof(err));
     if (rotor->last_batch.present) {
         written = write_batch_json(&rotor->last_batch, batch, sizeof(batch));
         if (written < 0 || (size_t)written >= sizeof(batch)) {
@@ -236,14 +284,16 @@ int rotor_state_json(const rotor_t *rotor, int64_t now_ms, bool clock_synced, ch
     written = snprintf(buf,
                        buf_len,
                        "{\"v\":1,\"ts_ms\":%" PRId64 ",\"clock_synced\":%s,\"mode\":\"%s\","
-                       "\"az_cdeg\":%s,\"el_cdeg\":%s,\"pan_mode\":%s,\"batch\":%s,"
-                       "\"rejected_total\":%" PRIu32 "}",
+                       "\"az_cdeg\":%s,\"el_cdeg\":%s,\"pan_mode\":%s,\"meas\":%s,\"err_cdeg\":%s,"
+                       "\"batch\":%s,\"rejected_total\":%" PRIu32 "}",
                        now_ms,
                        clock_synced ? "true" : "false",
                        rotor_mode_name(rotor->mode),
                        az,
                        el,
                        pan_mode,
+                       meas,
+                       err,
                        batch,
                        rotor->rejected_total);
     if (written < 0 || (size_t)written >= buf_len) {
