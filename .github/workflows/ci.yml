@@ -1,11 +1,6 @@
 name: ci
 
-# Required status checks match on the job id, so the jobs below keep no `name:`
-# override: a ruleset on develop or main can require "host-tests" and "build"
-# verbatim. No `paths:` filter either, because a required check that never runs
-# leaves the PR waiting forever. For the same reason main is listed next to
-# develop: the release PR from develop into main must run the checks its
-# ruleset requires, and a branch dropped from these lists must not be required.
+# The job ids (host-tests, build) are the check names a ruleset requires.
 on:
   pull_request:
     branches: [develop, main]
@@ -16,38 +11,19 @@ on:
 permissions:
   contents: read
 
-# A new push to a PR supersedes the run in progress. Pushes to develop or main
-# and manual runs get a group of their own (the run id): sharing one group would
-# still let Actions drop a queued run when a third one arrives, even with
-# cancel-in-progress off, and every commit on those branches should keep its
-# verdict.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
   host-tests:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
       # CFLAGS stays unset: the Makefiles use ?= and an inherited value drops the sanitizers.
       - run: for d in components/*/test_host; do make -C "$d" || exit 1; done
 
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - name: idf.py build (ESP-IDF v5.5.2)
-        uses: espressif/esp-idf-ci-action@v1
+      - uses: espressif/esp-idf-ci-action@v1
         with:
           # Pinned: IDF 6 dropped json and mqtt; a bump goes in its own PR.
           esp_idf_version: v5.5.2
-          target: esp32
