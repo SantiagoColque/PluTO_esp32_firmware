@@ -136,7 +136,7 @@ summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0}
       <h2>Device</h2>
       <button type="button" class="ghost" id="reboot">Restart</button>
       <button type="button" class="danger" id="reset">Erase configuration</button>
-      <div class="hint">Erasing returns the device to factory state and brings the setup portal back.</div>
+      <div class="hint">Erases the network settings and the dashboard password, then restarts. The mount calibration is kept.</div>
     </div>
   </details>
 </div>
@@ -288,7 +288,7 @@ $('reboot').addEventListener('click', function () {
 });
 
 $('reset').addEventListener('click', function () {
-  if (!confirm('Erase all configuration? The device will bring the setup portal back.')) return;
+  if (!confirm('Erase the network settings and the dashboard password? The mount calibration is kept.')) return;
   fetch('api/factory-reset', { method: 'POST' }).then(function (r) { return r.json(); })
     .then(function (d) { countdown(d.restart_ms, 'Configuration erased.'); });
 });
