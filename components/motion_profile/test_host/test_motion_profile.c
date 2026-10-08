@@ -65,8 +65,8 @@ static bool within_limits(const trace_t *trace, const motion_profile_config_t *c
 {
     float dt_s = (float)dt_ms / 1000.0f;
 
-    return (cfg->v_max_cdeg_s == 0 || trace->max_speed <= cfg->v_max_cdeg_s + SPEED_SLACK) &&
-           (cfg->a_max_cdeg_s2 == 0 || trace->max_accel <= cfg->a_max_cdeg_s2 + SPEED_SLACK / dt_s);
+    return trace->max_speed <= cfg->v_max_cdeg_s + SPEED_SLACK &&
+           trace->max_accel <= cfg->a_max_cdeg_s2 + SPEED_SLACK / dt_s;
 }
 
 /* Steps toward a fixed target until settled, recording the trace. Returns the
@@ -288,37 +288,6 @@ static void test_no_limits_follow_the_target_as_is(void)
     CHECK(!motion_profile_resting(&axis)); /* rest_after_ms 0: never */
 }
 
-static void test_a_speed_limit_alone_moves_at_constant_speed(void)
-{
-    const motion_profile_config_t speed_only = {V_MAX, 0, 0};
-    motion_profile_t axis;
-
-    motion_profile_init(&axis, &speed_only);
-    motion_profile_reset(&axis, 0);
-    CHECK(motion_profile_step(&axis, 1000, TICK_MS) == 300);
-    CHECK(motion_profile_step(&axis, 1000, TICK_MS) == 600);
-    CHECK(motion_profile_step(&axis, 1000, TICK_MS) == 900);
-    CHECK(motion_profile_step(&axis, 1000, TICK_MS) == 1000); /* lands, no overshoot */
-    CHECK(motion_profile_step(&axis, 1000, TICK_MS) == 1000);
-    CHECK(motion_profile_settled(&axis));
-}
-
-static void test_an_acceleration_limit_alone_has_no_top_speed(void)
-{
-    const motion_profile_config_t accel_only = {0, A_MAX, 0};
-    motion_profile_t axis;
-    trace_t trace;
-
-    motion_profile_init(&axis, &accel_only);
-    motion_profile_reset(&axis, 0);
-    trace_start(&trace, &axis);
-
-    CHECK(run_to(&axis, 18000, TICK_MS, &trace) > 0);
-    CHECK(within_limits(&trace, &accel_only, TICK_MS));
-    CHECK(trace.max_pos <= 18000.0f);
-    CHECK(trace.max_speed > V_MAX); /* sqrt(a * d) is about 147 degrees per second */
-}
-
 static void test_a_flip_is_a_ramp_within_the_range(void)
 {
     /* Crossing north at 30 degrees of elevation (az_ref 0): 359.90 to 0.10
@@ -405,21 +374,6 @@ static void test_a_brake_slows_down_at_the_acceleration_limit(void)
     braking_from = axis.pos_cdeg;
     motion_profile_brake(&axis, TICK_MS);
     CHECK(axis.pos_cdeg == braking_from);
-}
-
-static void test_a_brake_without_an_acceleration_limit_stops_at_once(void)
-{
-    const motion_profile_config_t speed_only = {V_MAX, 0, 0};
-    motion_profile_t axis;
-    int32_t before;
-
-    motion_profile_init(&axis, &speed_only);
-    motion_profile_reset(&axis, 0);
-    motion_profile_step(&axis, 18000, TICK_MS);
-    before = motion_profile_step(&axis, 18000, TICK_MS);
-
-    CHECK(motion_profile_brake(&axis, TICK_MS) == before);
-    CHECK(motion_profile_settled(&axis));
 }
 
 static void test_it_rests_after_the_timeout_at_the_same_target(void)
@@ -534,12 +488,9 @@ int main(void)
     test_a_zero_or_negative_dt_moves_nothing();
     test_a_huge_dt_counts_as_the_longest_step();
     test_no_limits_follow_the_target_as_is();
-    test_a_speed_limit_alone_moves_at_constant_speed();
-    test_an_acceleration_limit_alone_has_no_top_speed();
     test_a_flip_is_a_ramp_within_the_range();
     test_a_target_moved_back_is_overshot_short_of_the_old_one();
     test_a_brake_slows_down_at_the_acceleration_limit();
-    test_a_brake_without_an_acceleration_limit_stops_at_once();
     test_it_rests_after_the_timeout_at_the_same_target();
     test_a_new_target_ends_the_rest_at_once();
     test_a_moving_axis_does_not_rest();

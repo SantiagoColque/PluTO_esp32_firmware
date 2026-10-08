@@ -49,28 +49,12 @@ static float braking_speed(float dist_cdeg, float dv_cdeg_s, float dt_s)
 static void advance(motion_profile_t *axis, float target_cdeg, float dt_s)
 {
     float error = target_cdeg - axis->pos_cdeg;
-    float speed;
-    float vel;
-
-    if (axis->cfg.a_max_cdeg_s2 > 0) {
-        speed = braking_speed(fabsf(error), (float)axis->cfg.a_max_cdeg_s2 * dt_s, dt_s);
-    } else {
-        /* Nothing limits the deceleration: the most it may do is land. */
-        speed = fabsf(error) / dt_s;
-    }
-    if (axis->cfg.v_max_cdeg_s > 0 && speed > (float)axis->cfg.v_max_cdeg_s) {
-        speed = (float)axis->cfg.v_max_cdeg_s;
-    }
-    vel = copysignf(speed, error);
-
+    float dv = (float)axis->cfg.a_max_cdeg_s2 * dt_s;
+    float speed = fminf(braking_speed(fabsf(error), dv, dt_s), (float)axis->cfg.v_max_cdeg_s);
     /* The braking curve wants to slow down faster than allowed only when the
-     * target moved back toward the axis. Then it goes past and comes back,
-     * stopping short of the previous target, which it could still stop for. */
-    if (axis->cfg.a_max_cdeg_s2 > 0) {
-        float dv = (float)axis->cfg.a_max_cdeg_s2 * dt_s;
-
-        vel = fminf(fmaxf(vel, axis->vel_cdeg_s - dv), axis->vel_cdeg_s + dv);
-    }
+     * target moved back toward the axis, or after a longer tick. Then it goes
+     * a little past and comes back. */
+    float vel = fminf(fmaxf(copysignf(speed, error), axis->vel_cdeg_s - dv), axis->vel_cdeg_s + dv);
 
     axis->pos_cdeg += vel * dt_s;
     axis->vel_cdeg_s = vel;
@@ -118,7 +102,7 @@ int32_t motion_profile_step(motion_profile_t *axis, int32_t target_cdeg, int32_t
     axis->has_target = true;
     axis->target_cdeg = target_cdeg;
 
-    if (!axis->has_position || (axis->cfg.v_max_cdeg_s <= 0 && axis->cfg.a_max_cdeg_s2 <= 0)) {
+    if (!axis->has_position || (axis->cfg.v_max_cdeg_s == 0 && axis->cfg.a_max_cdeg_s2 == 0)) {
         axis->pos_cdeg = (float)target_cdeg;
         axis->vel_cdeg_s = 0.0f;
         axis->has_position = true;
@@ -136,9 +120,8 @@ int32_t motion_profile_brake(motion_profile_t *axis, int32_t dt_ms)
 
     axis->has_target = false;
 
-    if (axis->cfg.a_max_cdeg_s2 <= 0) {
-        axis->vel_cdeg_s = 0.0f;
-    } else if (dt > 0) {
+    /* MOTION_PROFILE_NO_LIMITS never builds up a speed: no case of its own. */
+    if (dt > 0) {
         float dt_s = (float)dt / 1000.0f;
         float dv = (float)axis->cfg.a_max_cdeg_s2 * dt_s;
 

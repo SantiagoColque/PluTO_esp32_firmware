@@ -23,13 +23,14 @@
  */
 #define MOTION_PROFILE_MAX_DT_MS 100
 
+/* Both limits positive, or both 0 for no ramp at all. */
 typedef struct {
-    int32_t v_max_cdeg_s;  /* top speed; 0 for no speed limit */
-    int32_t a_max_cdeg_s2; /* top acceleration and deceleration; 0 for no limit */
+    int32_t v_max_cdeg_s;  /* top speed */
+    int32_t a_max_cdeg_s2; /* top acceleration and deceleration */
     int32_t rest_after_ms; /* still this long at the same target to rest; 0 never rests */
 } motion_profile_config_t;
 
-/* With both limits at 0 the axis is commanded the target as is. */
+/* The target as is, for tests that want no ramp. */
 #define MOTION_PROFILE_NO_LIMITS ((motion_profile_config_t){0})
 
 typedef struct {

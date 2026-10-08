@@ -6,10 +6,9 @@ menu "PluTO motion profile"
     config PLUTO_MOTION_MAX_SPEED_DEG_S
         int "Top speed of each servo axis (degrees per second)"
         default 60
-        range 0 600
+        range 1 600
         help
-            The fastest either axis is commanded to move (HU-36). 0 removes the
-            limit. Lower is gentler on the gears and the mount, but the pan
+            The fastest either axis is commanded to move (HU-36). Lower is gentler on the gears and the mount, but the pan
             follows the azimuth, which turns at about 25 deg/s at the top of a
             pass culminating at 88 degrees. Below about 20 the pan falls behind
             there: test_a_high_pass_keeps_up in components/rotor/test_host
@@ -20,13 +19,12 @@ menu "PluTO motion profile"
     config PLUTO_MOTION_MAX_ACCEL_DEG_S2
         int "Top acceleration of each servo axis (degrees per second squared)"
         default 120
-        range 0 5000
+        range 1 5000
         help
             The fastest either axis speeds up or slows down, including the
             braking after a HOLD (HU-36). This is what spares the gears the jerk
             of a servo told to jump: at 120 an axis reaches 60 deg/s in half a
-            second and stops from it within 15 degrees. 0 removes the limit, so
-            the axis starts and stops at full speed. Too low and high passes
+            second and stops from it within 15 degrees. Too low and high passes
             fall behind as well: the same test misses by 0.3 degrees at 30.
 
     config PLUTO_MOTION_REST_AFTER_MS
