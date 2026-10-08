@@ -42,11 +42,12 @@ Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, i
   `s_rotor_lock` (decode, validate, load the trajectory) and then publishes the state. It
   never touches the servos. Its own tick can set the very first pose as is (there is no
   position to ramp from), and `rotor_task` sends it on its next tick.
-- `rotor_task` runs every 50 ms with a monotonic `dt_ms` from `esp_timer`. `rotor_tick()`
-  follows the trajectory through the motion profile, and outside the lock the commanded
-  pose goes to `servo_driver_set()`, or `servo_driver_release()` once
-  `rotor_outputs_resting()` says the axes have rested (HU-35). **This is where the servos
-  are driven.**
+- `rotor_task` runs every 50 ms with a monotonic `dt_ms` from `esp_timer`. With
+  `CONFIG_PLUTO_ENCODERS` it first reads both encoders, outside the lock, and hands the
+  angles to `rotor_set_measured()`. `rotor_tick()` follows the trajectory through the
+  motion profile, and outside the lock the commanded pose goes to `servo_driver_set()`,
+  or `servo_driver_release()` once `rotor_outputs_resting()` says the axes have rested
+  (HU-35). **This is where the servos are driven.**
 - The same task publishes the state on `device/<device_id>/state`: every second while
   tracking, every ten at rest, and at once when the mode changes.
 
@@ -61,12 +62,13 @@ Each is a standard IDF component under `components/`, with its public API in
   than copying, because some IDF APIs store the pointer they are handed —
   `esp_sntp_setservername()` does — and a field of a stack-allocated struct would dangle.
   It also keeps the mount's calibration (`pluto_calibration_t`: `az_ref`, the pan and
-  tilt limits and each servo's pulse at 0 and at 180 degrees) in a namespace of its own,
-  `pluto_cal`, so that `config_store_factory_reset()`, which erases `pluto_cfg` to
-  re-provision the WiFi, leaves it alone. It stores plain integers and checks nothing:
-  `start_rotor()` checks the mount with `pan_tilt_config_valid()` and the driver checks
-  the pulses; if either is invalid the servos are not started. `POST /api/calibration`
-  makes the same checks before saving.
+  tilt limits, each servo's pulse at 0 and at 180 degrees and each encoder's zero and
+  direction) in a namespace of its own, `pluto_cal`, so that
+  `config_store_factory_reset()`, which erases `pluto_cfg` to re-provision the WiFi,
+  leaves it alone. It stores plain integers and checks nothing: `start_rotor()` checks
+  the mount with `pan_tilt_config_valid()` and the driver checks the pulses; if either is
+  invalid the servos are not started. `POST /api/calibration` makes the same checks
+  before saving.
 - **wifi_manager** — the state machine: `IDLE → CONNECTING → CONNECTED`, plus
   `PROVISIONING` (AP only, never configured) and `AP_FALLBACK` (AP up while the station
   keeps retrying). Reconnect backoff doubles from 1 s to `WIFI_RECONNECT_MAX_BACKOFF_SEC`
@@ -111,8 +113,9 @@ The pointing pipeline is split the same way: pure components with host tests
   braking ramp after a `HOLD`, and when an axis has rested (HU-35). See its header.
 - **rotor** — the board's side of both contracts: takes payloads, applies the rules that
   need the clock and the mount, follows the trajectory through `motion_profile`, clamps
-  the commanded pose to the mount and writes the JSON state, which reports that pose.
-  See its header.
+  the commanded pose to the mount and writes the JSON state, which reports that pose
+  and, when the encoders give one, the measured position and its error against the
+  target (`meas` and `err_cdeg`, `device-state.md` §4). See its header.
 - **servo** — the two DS3218 on LEDC: 50 Hz, a 16-bit duty, one channel per servo.
   `servo_pulse` is the pure half: servo angle to pulse width with a two-point
   calibration per servo, which covers trim, scale, direction and the 270-degree version,
@@ -122,6 +125,13 @@ The pointing pipeline is split the same way: pure components with host tests
   `servo_driver_release()` stops the pulses on both channels for HU-35 (duty 0, so no
   pulse is cut short), and the next `servo_driver_set()` resumes them. Not yet checked on
   hardware.
+- **encoder** — one AS5600 per axis, each alone on one of the two I2C controllers because
+  its address is fixed. `encoder_angle` is the pure half: raw count to servo angle with
+  a zero and a direction per axis. `as5600` is the I2C half, on the new `i2c_master`
+  driver only (the legacy `driver/i2c.h` aborts at boot next to it): raw angle and
+  magnet status, with each problem logged once as it appears and clears. Behind
+  `CONFIG_PLUTO_ENCODERS`, off by default; the chip is not confirmed and nothing is
+  checked on hardware.
 
 ## HTTP API
 
@@ -204,6 +214,11 @@ The *"PluTO motion profile"* menu (`components/motion_profile/Kconfig`) is compi
 the same way: top speed, acceleration and rest timeout, one set for both axes, in
 degrees; `start_rotor()` converts them to centidegrees.
 
+So is *"PluTO encoders"* (`components/encoder/Kconfig`): `CONFIG_PLUTO_ENCODERS`, off by
+default, and the I2C pins (pan on 21/22, tilt on 32/33). Each encoder's zero and
+direction are part of the stored calibration, with no menuconfig seed: they start at 0
+and +1 until the dashboard can set them (card 4b).
+
 ## Build and flash
 
     idf.py set-target esp32
@@ -270,8 +285,9 @@ Roughly in the order the SRS prioritizes them:
   compile-time and shared by both axes, and the rest state cuts both outputs at once.
   Whether the DS3218 holds the tilt under the antenna without pulses, and so which
   outputs may be cut, is still to be measured.
-- **Telemetry of actual position** (HU-24, HU-29): the state reports the commanded pose
-  after the motion profile, not a measured one.
-  Elevation threshold (HU-30).
+- **Telemetry of actual position on hardware** (HU-24, HU-29): `meas` and `err_cdeg` are
+  implemented behind `CONFIG_PLUTO_ENCODERS`, but the chip is unconfirmed, the encoders
+  are not mounted and nothing sets their zero yet (card 4b).
+- **Elevation threshold** (HU-30).
 - **OTA updates** (HU-32) — the partition table has a single `factory` app slot, so
   adding OTA means changing it.
