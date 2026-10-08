@@ -153,8 +153,9 @@ static void test_the_cut_is_at_the_first_point_even_if_it_expired(void)
     EXPECT_TARGET(&traj, T0 + 1600, 18800, 3600); /* from the old t0 point to the new t0+2000 one */
 }
 
-/* Out of room, the oldest points go, which are the ones already passed; the
- * new batch's never do. */
+/* Out of room, the oldest points go and the new batch's never do. With the
+ * server's cadence, 5 points 2 s ahead (§10), the ones that go have already
+ * passed as long as the points are at least 200 ms apart. */
 static void test_out_of_room_the_oldest_points_go(void)
 {
     trajectory_t traj;
@@ -172,8 +173,9 @@ static void test_out_of_room_the_oldest_points_go(void)
     EXPECT_TARGET(&traj, T0 + 12500, 11250, 2625); /* still on the old points */
     EXPECT_TARGET(&traj, T0 + 17000, 11700, 2850); /* the new last point is there */
 
-    /* A full batch leaves no room for anything older, so the target waits on
-     * its first point. */
+    /* A full batch leaves no room for anything older, so even the current
+     * point and the next one go and the target jumps 2 s ahead, to its first
+     * point. */
     fill_line(newer, 16, TRAJECTORY_MAX_POINTS);
     CHECK(trajectory_load(&traj, newer, TRAJECTORY_MAX_POINTS, T0 + 14000, TOLERANCE_MS) ==
           TRAJECTORY_MAX_POINTS);

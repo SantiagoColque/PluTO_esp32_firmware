@@ -69,7 +69,10 @@ size_t trajectory_load(trajectory_t *traj,
     }
     new_count = count - first_kept;
 
-    /* Out of room, the oldest go first: those are the ones already passed. */
+    /* Out of room, the oldest go first. With the server's cadence, 5 points
+     * 2 s ahead (§10), those have already passed as long as the points are at
+     * least 200 ms apart; a longer batch or closer points leave no room and
+     * the target jumps ahead. */
     if (old_kept + new_count > TRAJECTORY_MAX_POINTS) {
         size_t dropped = old_kept + new_count - TRAJECTORY_MAX_POINTS;
 
