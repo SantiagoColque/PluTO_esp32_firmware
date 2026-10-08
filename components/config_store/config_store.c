@@ -494,7 +494,7 @@ esp_err_t config_store_set_calibration(const pluto_calibration_t *in)
 
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Calibration saved: az_ref=%ld pan=%ld..%ld tilt=%ld..%ld cdeg, "
-                      "pulses pan=%ld/%ld tilt=%ld/%ld us, encoders pan=%ld/%+ld tilt=%ld/%+ld",
+                      "pulses pan=%ld/%ld tilt=%ld/%ld us, enc pan=%ld/%+ld tilt=%ld/%+ld",
                  (long)in->az_ref_cdeg,
                  (long)in->pan_min_cdeg,
                  (long)in->pan_max_cdeg,
