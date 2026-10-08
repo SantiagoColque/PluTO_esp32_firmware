@@ -133,6 +133,26 @@ static void test_a_new_batch_wins_from_its_first_point_on(void)
     EXPECT_TARGET(&traj, T0 + 1900, 21000, 4000); /* and so is the third */
 }
 
+/* The cut is at the batch's first instant even when that point has expired
+ * (§6.7), so the old point there goes too: the batch was meant to replace it. */
+static void test_the_cut_is_at_the_first_point_even_if_it_expired(void)
+{
+    trajectory_t traj;
+    trajectory_point_t old[5];
+    const trajectory_point_t newer[] = {
+        {T0 + 1000, 20000, 4000},
+        {T0 + 2000, 21000, 4000},
+        {T0 + 3000, 22000, 4000},
+    };
+
+    fill_line(old, 0, 5);
+    trajectory_init(&traj);
+    trajectory_load(&traj, old, 5, T0 - 2000, TOLERANCE_MS);
+
+    CHECK(trajectory_load(&traj, newer, 3, T0 + 1600, TOLERANCE_MS) == 2);
+    EXPECT_TARGET(&traj, T0 + 1600, 18800, 3600); /* from the old t0 point to the new t0+2000 one */
+}
+
 /* Out of room, the oldest points go, which are the ones already passed; the
  * new batch's never do. */
 static void test_out_of_room_the_oldest_points_go(void)
@@ -252,6 +272,7 @@ int main(void)
     test_azimuth_crosses_north_the_short_way();
     test_a_batch_sent_early_does_not_pull_the_target_ahead();
     test_a_new_batch_wins_from_its_first_point_on();
+    test_the_cut_is_at_the_first_point_even_if_it_expired();
     test_out_of_room_the_oldest_points_go();
     test_after_a_hold_the_target_starts_on_the_first_point();
     test_expired_points_are_dropped();
