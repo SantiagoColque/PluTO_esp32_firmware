@@ -28,10 +28,11 @@ and `device-state.md` for what the board reports.
 ## Wiring
 
 The pan servo's signal goes to GPIO25 and the tilt's to GPIO26 (see
-[Configuration](#configuration)), with the servos' ground tied to the ESP32's. Put a
-10 kΩ pull-down from each signal to GND: the pins float from reset until the firmware
-starts the servos, which never happens in the setup portal and waits for WiFi otherwise,
-and a floating input can make a powered servo twitch.
+[Configuration](#configuration)). Power the servos from their own 6–6.5 V rail (the
+step-down from the 12 V supply, never the 12 V itself nor the devkit's 5V pin), with a
+common ground. Put a 10 kΩ pull-down from each signal to GND: the pins float from reset
+until the firmware starts the servos, which never happens in the setup portal and waits
+for WiFi otherwise, and a floating input can make a powered servo twitch.
 
 The encoders are optional and only read by a build with `PLUTO_ENCODERS` on: one AS5600
 per axis, each on its own I2C bus because the chip's address is fixed. Pan goes to SDA
