@@ -104,8 +104,9 @@ The pointing pipeline is split the same way: pure components with host tests
 - **coord_dto** — decodes and validates the binary setpoint batch of
   `coordinates-dto.md`, with the reject codes of `device-state.md` §5.
 - **trajectory** — what the board does between messages: a new batch replaces the
-  pending points, the target is interpolated in time with the azimuth taking the short
-  way round, it stays on the last point, and a `HOLD` drops everything pending.
+  pending points from its first instant on (the earlier ones stay, as in the server's
+  `merge_trajectory`), the target is interpolated in time with the azimuth taking the
+  short way round, it stays on the last point, and a `HOLD` drops everything pending.
 - **pan_tilt** — geographic az/el to the angles of two 180-degree servos, flipping past
   the zenith for the back half of the sky (`coordinates-dto.md` §9). Kinematics only:
   trims and pulses belong to `servo`.
