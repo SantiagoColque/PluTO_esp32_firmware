@@ -426,7 +426,7 @@ static esp_err_t calibration_post_handler(httpd_req_t *req)
     if (!pan_tilt_config_valid(&mount)) {
         return web_send_error(req,
                               HTTPD_400_BAD_REQUEST,
-                              "az_ref must be 0 to 35999, and each axis's min below its max within 0 to 18000");
+                              "az_ref must be below 360 degrees, and each axis's min below its max within 0 to 180");
     }
 
     if (!servo_calibration_valid(&pan) || !servo_calibration_valid(&tilt)) {
