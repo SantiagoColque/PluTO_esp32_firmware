@@ -151,7 +151,7 @@ first-time setup there is no password to type yet.
 | `/logs` | GET | the log page (gzipped `logs.html`), linked from the Status card |
 | `/api/logs` | GET | the newest `CONFIG_PLUTO_LOG_RING_LINES` lines from `log_ring`, oldest first |
 | `/api/calibration` | GET | the stored mount calibration, keyed by the fields of `pluto_calibration_t` |
-| `/api/calibration` | POST | replace it: all nine fields, whole numbers, checked like at boot; applies at the next restart |
+| `/api/calibration` | POST | replace it: all thirteen fields, whole numbers, checked like at boot; applies at the next restart |
 
 The dashboard's default password is derived from the MAC: `pluto-xxxxxx`, logged at boot.
 
@@ -200,9 +200,9 @@ the `pluto_cal` namespace, which the dashboard's factory reset does not touch. W
 erase it is wiping the whole NVS partition: `idf.py erase-flash`, or `init_nvs()` in
 `main.c` when NVS reports no free pages or a new version. The next boot seeds it again.
 Once stored, it is edited from the dashboard's *Mount calibration* section
-(`/api/calibration`), in degrees and microseconds. It is not applied live: the rotor and
-the servo driver read it at boot, so it takes a restart, which the dashboard leaves to
-the user so that saving does not cut a pass short.
+(`/api/calibration`), in degrees, microseconds and encoder counts. It is not applied
+live: the rotor, the servo driver and the encoders read it at boot, so it takes a
+restart, which the dashboard leaves to the user so that saving does not cut a pass short.
 
 The rest of the *"PluTO servos"* menu is compiled in, so a change there means
 reflashing: the signal pins (25 and 26, leaving 21/22 and 32/33 for the encoders' I2C)
@@ -217,7 +217,7 @@ degrees; `start_rotor()` converts them to centidegrees.
 So is *"PluTO encoders"* (`components/encoder/Kconfig`): `CONFIG_PLUTO_ENCODERS`, off by
 default, and the I2C pins (pan on 21/22, tilt on 32/33). Each encoder's zero and
 direction are part of the stored calibration, with no menuconfig seed: they start at 0
-and +1 until the dashboard can set them (card 4b).
+and +1 and are set from the dashboard.
 
 ## Build and flash
 
@@ -287,7 +287,7 @@ Roughly in the order the SRS prioritizes them:
   outputs may be cut, is still to be measured.
 - **Telemetry of actual position on hardware** (HU-24, HU-29): `meas` and `err_cdeg` are
   implemented behind `CONFIG_PLUTO_ENCODERS`, but the chip is unconfirmed, the encoders
-  are not mounted and nothing sets their zero yet (card 4b).
+  are not mounted and their zero is typed in by hand (homing above).
 - **Elevation threshold** (HU-30).
 - **OTA updates** (HU-32) — the partition table has a single `factory` app slot, so
   adding OTA means changing it.
