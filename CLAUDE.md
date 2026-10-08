@@ -151,6 +151,11 @@ unprovisioned and raises the setup portal. Setting it is a development shortcut.
 `.vscode/settings.json` points the ESP-IDF extension at `~/esp/esp-idf` and
 `/dev/ttyUSB0`; adjust locally rather than committing a different path.
 
+`components/coord_dto/test_host/coord_dto_vectors.txt` holds payloads made by the
+server's encoder, which the decoder's host test must read back. After a change to PluTO's
+`server_core/coord_dto.py`, regenerate it with
+`python3 tools/gen_coord_dto_vectors.py <path to PluTO>` and commit the result.
+
 ## Conventions
 
 - Code, comments and commit messages are in **English**; the requirements documents are
