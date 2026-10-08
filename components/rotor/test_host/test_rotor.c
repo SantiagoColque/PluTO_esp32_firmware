@@ -469,10 +469,10 @@ static void test_the_outputs_rest_and_wake(void)
     CHECK(!rotor_outputs_resting(&rotor));
 }
 
-/* What main's drive_servos() relies on to release and resume the outputs: a
- * batch that only repeats where the axes rest moves nothing and keeps them at
- * rest, while after a HOLD any target, even the spot they stopped on, wakes
- * them with the commanded pose unchanged. */
+/* What main relies on to release and resume the outputs: a batch that only
+ * repeats where the axes rest moves nothing and keeps them at rest, while
+ * after a HOLD any target, even the spot they stopped on, wakes them with the
+ * commanded pose unchanged. */
 static void test_only_something_to_do_wakes_the_outputs(void)
 {
     rotor_t rotor;

@@ -166,77 +166,10 @@ static void coordinates_message_handler(const char *topic,
     publish_state();
 }
 
-/*
- * What rotor_task has done to the servos. Only that task touches it, like the
- * driver itself, so it needs no lock.
- */
-typedef struct {
-    bool live;            /* pulses may be going out: driven since the last release that worked */
-    bool sent;            /* pose is what the driver last accepted while live */
-    pan_tilt_pose_t pose;
-    bool failing;         /* the last driver call failed; reported once per run of failures */
-} servo_link_t;
-
-/*
- * Hands the commanded pose to the servos, or releases them at rest (HU-35).
- *
- * The pose is the one after the motion profile, which changes on every tick of
- * a ramp, and it is compared against the last one the driver accepted rather
- * than taken from rotor_tick()'s result: the MQTT handler's own tick can set
- * the first pose of a batch, which no later tick reports, so a single-point
- * batch would never move the servos (rotor.h). Only pan and tilt reach the
- * servos; the mode does not change a pulse.
- *
- * Releasing forgets the pose sent, whatever the release returns: the driver
- * stops each channel on its own, so even a failed release may have silenced
- * one, and the pose has to go out again when the outputs wake, unchanged or
- * not. A failed release is retried on the next tick at rest.
- */
-static void drive_servos(servo_link_t *link, bool has_pose, const pan_tilt_pose_t *pose, bool resting)
-{
-    const char *what;
-    esp_err_t err;
-
-    if (resting) {
-        if (!link->live) {
-            return;
-        }
-        what = "released";
-        err = servo_driver_release();
-        link->sent = false;
-        if (err == ESP_OK) {
-            link->live = false;
-        }
-    } else if (has_pose && (!link->sent || pose->pan_cdeg != link->pose.pan_cdeg ||
-                            pose->tilt_cdeg != link->pose.tilt_cdeg)) {
-        what = "driven";
-        /* Before the call: a set that fails on the tilt has already started the pan. */
-        link->live = true;
-        err = servo_driver_set(pose->pan_cdeg, pose->tilt_cdeg);
-        if (err == ESP_OK) {
-            link->sent = true;
-            link->pose = *pose;
-        }
-    } else {
-        return;
-    }
-
-    if (err == ESP_OK) {
-        link->failing = false;
-    } else if (!link->failing) {
-        /* Once per run of failures: this retries every tick and /logs only
-         * keeps a few lines. */
-        ESP_LOGE(TAG, "Servos not %s: %s", what, esp_err_to_name(err));
-        link->failing = true;
-    }
-}
-
 static void rotor_task(void *arg)
 {
     TickType_t last_state = xTaskGetTickCount();
     rotor_mode_t last_mode = ROTOR_MODE_IDLE;
-    /* servo_driver_init() leaves both lines low, the same as a release. */
-    servo_link_t link = {0};
     bool last_resting = true;
     /* The servos move in monotonic time: SNTP steps the wall clock, and a
      * jump there must not become a jump of the antenna. */
@@ -266,17 +199,21 @@ static void rotor_task(void *arg)
         mode_unreported = mode != s_reported_mode;
         xSemaphoreGive(s_rotor_lock);
 
-        /* Outside the lock: the MQTT task waits on it, and LEDC needs no
-         * part of the rotor's state. */
-        drive_servos(&link, has_pose, &pose, resting);
+        /* Outside the lock, every tick: the driver skips a duty it already has
+         * and resumes released outputs on the next set. Its only error is "not
+         * started", which start_rotor() has already logged. */
+        if (resting) {
+            servo_driver_release();
+        } else if (has_pose) {
+            servo_driver_set(pose.pan_cdeg, pose.tilt_cdeg);
+        }
 
         if (mode != last_mode) {
             ESP_LOGI(TAG, "Rotor mode: %s", rotor_mode_name(mode));
             last_mode = mode;
         }
         if (resting != last_resting) {
-            /* The rotor's view, logged even when the driver is down, so the
-             * rest state can be followed on a board with no servos. */
+            /* Logged even with the driver down, to follow HU-35 without servos. */
             ESP_LOGI(TAG, "Servo outputs %s", resting ? "at rest" : "active");
             last_resting = resting;
         }

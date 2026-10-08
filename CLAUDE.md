@@ -39,21 +39,14 @@ Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, i
 `device/<device_id>/coordinates/polar`. From there the pointing pipeline runs in `main.c`:
 
 - `coordinates_message_handler` hands each payload to `rotor_handle_payload()` under
-  `s_rotor_lock`. The rotor decodes and validates it, loads the trajectory and updates
-  its target; the handler then publishes the state. It does not move the servos, except
-  for the very first pose, which is taken as is because there is no position to ramp
-  from.
-- `rotor_task` runs every 50 ms. `rotor_tick()` follows the trajectory, turns az/el into
-  pan/tilt angles and steps each axis toward them within the speed and acceleration
-  limits of `motion_profile`, with the time since the last tick measured on
-  `esp_timer`, never on the wall clock that SNTP steps. **This is where the servos are
-  driven** (`drive_servos()`, outside the lock): every commanded pose that differs from
-  the last one sent goes to `servo_driver_set()`, so a ramp sends one on each tick. It
-  compares against the last pose sent rather than using `rotor_tick()`'s return value,
-  because the handler's own tick can set a pose that no later tick reports (see
-  `rotor.h`). When `rotor_outputs_resting()` says both axes have stood still for the
-  rest timeout, it calls `servo_driver_release()` (HU-35); the next pose to go out,
-  changed or not, resumes the pulses.
+  `s_rotor_lock` (decode, validate, load the trajectory) and then publishes the state. It
+  never touches the servos. Its own tick can set the very first pose as is (there is no
+  position to ramp from), and `rotor_task` sends it on its next tick.
+- `rotor_task` runs every 50 ms with a monotonic `dt_ms` from `esp_timer`. `rotor_tick()`
+  follows the trajectory through the motion profile, and outside the lock the commanded
+  pose goes to `servo_driver_set()`, or `servo_driver_release()` once
+  `rotor_outputs_resting()` says the axes have rested (HU-35). **This is where the servos
+  are driven.**
 - The same task publishes the state on `device/<device_id>/state`: every second while
   tracking, every ten at rest, and at once when the mode changes.
 
