@@ -257,7 +257,7 @@ servos**, **> PluTO motion profile** and **> PluTO encoders**. Each option is
 | `PLUTO_CAL_PAN_MIN_CDEG`, `PLUTO_CAL_PAN_MAX_CDEG` | 0, 18000 | Seed | Usable pan range; an invalid one keeps the servos stopped. |
 | `PLUTO_CAL_TILT_MIN_CDEG`, `PLUTO_CAL_TILT_MAX_CDEG` | 0, 18000 | Seed | Usable tilt range, from the horizon ahead to the one behind. |
 | **Component config > PluTO servos** | | | |
-| `PLUTO_SERVO_DS3218_VERSION` | 270 degrees | Build | Sets the pulses' defaults; 270 is the safe choice until the servos are identified. |
+| `PLUTO_SERVO_DS3218_180`, `PLUTO_SERVO_DS3218_270` | 270 | | Only picks the default pulses below in a new `sdkconfig` (500/2500 for 180°); 270 is the safe choice. Once the servos are identified, set the pulses on the dashboard: a board keeps the ones it stored. |
 | `PLUTO_SERVO_PAN_GPIO` | 25 | Build | Pan signal pin; keep 21/22 and 32/33 free for the encoders. |
 | `PLUTO_SERVO_TILT_GPIO` | 26 | Build | Tilt signal pin. |
 | `PLUTO_SERVO_PAN_US_AT_0`, `PLUTO_SERVO_PAN_US_AT_180` | 834, 2166 | Seed | Pan pulse (µs) at 0 and 180 degrees; swap them to reverse the servo. |
