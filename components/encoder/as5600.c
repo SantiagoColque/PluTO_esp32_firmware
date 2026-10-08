@@ -72,7 +72,8 @@ esp_err_t as5600_read(as5600_t *encoder, uint16_t *raw)
     }
 
     if (err != ESP_OK) {
-        issue = esp_err_to_name(err);
+        /* i2c_master reports a NACK, a missing chip, as ESP_ERR_INVALID_STATE. */
+        issue = "no answer on I2C";
     } else if (!(status & STATUS_MD)) {
         issue = "no magnet";
         err = ESP_ERR_NOT_FOUND;
