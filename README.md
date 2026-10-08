@@ -34,9 +34,9 @@ starts the servos, which never happens in the setup portal and waits for WiFi ot
 and a floating input can make a powered servo twitch.
 
 The encoders are optional and only read by a build with `PLUTO_ENCODERS` on: one AS5600
-per axis, each on its own I2C bus because the chip's address is fixed. By default pan
-goes to SDA GPIO21 / SCL GPIO22 and tilt to SDA GPIO32 / SCL GPIO33. Power them from
-3V3, never 5 V, and add 2.2–4.7 kΩ pull-ups from SDA and SCL to 3V3.
+per axis, each on its own I2C bus because the chip's address is fixed. Pan goes to SDA
+GPIO21 / SCL GPIO22 and tilt to SDA GPIO32 / SCL GPIO33 (fixed in `main.c`). Power them
+from 3V3, never 5 V, and add 2.2–4.7 kΩ pull-ups from SDA and SCL to 3V3.
 
 ## Build
 
@@ -267,8 +267,6 @@ servos**, **> PluTO motion profile** and **> PluTO encoders**. Each option is
 | `PLUTO_MOTION_REST_AFTER_MS` | 5000 (0–3600000) | Build | Stillness before the servo outputs are released (HU-35); 0 never. |
 | **Component config > PluTO encoders** | | | |
 | `PLUTO_ENCODERS` | off | Build | Read each axis from an AS5600 and report `meas` and `err_cdeg`. |
-| `PLUTO_ENCODER_PAN_SDA_GPIO`, `PLUTO_ENCODER_PAN_SCL_GPIO` | 21, 22 | Build | Pan encoder's I2C pins (I2C0). |
-| `PLUTO_ENCODER_TILT_SDA_GPIO`, `PLUTO_ENCODER_TILT_SCL_GPIO` | 32, 33 | Build | Tilt encoder's I2C pins (I2C1). |
 
 ## Host tests
 
