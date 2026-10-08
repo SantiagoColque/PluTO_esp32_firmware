@@ -11,7 +11,9 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 
+#include "as5600.h"
 #include "config_store.h"
+#include "encoder_angle.h"
 #include "log_ring.h"
 #include "mqtt_manager.h"
 #include "rotor.h"
@@ -34,6 +36,14 @@ static SemaphoreHandle_t s_rotor_lock;
 /* The mode in the last state published, so a change of mode (the end of a
  * pass, for one) is reported right away and only once. */
 static rotor_mode_t s_reported_mode = ROTOR_MODE_IDLE;
+
+#if CONFIG_PLUTO_ENCODERS
+/* Used only by the rotor task, after start_rotor() sets them up. */
+static as5600_t s_pan_encoder;
+static as5600_t s_tilt_encoder;
+static encoder_calibration_t s_pan_encoder_cal;
+static encoder_calibration_t s_tilt_encoder_cal;
+#endif
 
 static int64_t now_ms(void)
 {
@@ -166,6 +176,30 @@ static void coordinates_message_handler(const char *topic,
     publish_state();
 }
 
+/* The servo angles the encoders read. False without encoders, or when either
+ * one has no reading: the state then reports none. */
+static bool read_encoders(int32_t *pan_cdeg, int32_t *tilt_cdeg)
+{
+#if CONFIG_PLUTO_ENCODERS
+    uint16_t pan_raw;
+    uint16_t tilt_raw;
+    /* Both every tick, so the log follows each one's problems. */
+    bool pan_ok = as5600_read(&s_pan_encoder, &pan_raw) == ESP_OK;
+    bool tilt_ok = as5600_read(&s_tilt_encoder, &tilt_raw) == ESP_OK;
+
+    if (!pan_ok || !tilt_ok) {
+        return false;
+    }
+    *pan_cdeg = encoder_angle_cdeg(&s_pan_encoder_cal, pan_raw);
+    *tilt_cdeg = encoder_angle_cdeg(&s_tilt_encoder_cal, tilt_raw);
+    return true;
+#else
+    (void)pan_cdeg;
+    (void)tilt_cdeg;
+    return false;
+#endif
+}
+
 static void rotor_task(void *arg)
 {
     TickType_t last_state = xTaskGetTickCount();
@@ -184,13 +218,20 @@ static void rotor_task(void *arg)
         bool resting;
         bool mode_unreported;
         TickType_t period;
+        int32_t measured_pan = 0;
+        int32_t measured_tilt = 0;
+        bool measured;
         int32_t dt_ms = (int32_t)((esp_timer_get_time() - last_tick_us) / 1000);
 
         /* Advanced by whole milliseconds so the remainder carries over to the
          * next tick instead of making the profile run slow. */
         last_tick_us += (int64_t)dt_ms * 1000;
 
+        /* Before taking the lock: the I2C reads would hold off the MQTT handler. */
+        measured = read_encoders(&measured_pan, &measured_tilt);
+
         xSemaphoreTake(s_rotor_lock, portMAX_DELAY);
+        rotor_set_measured(&s_rotor, measured, measured_pan, measured_tilt);
         rotor_tick(&s_rotor, now_ms(), dt_ms);
         has_pose = s_rotor.has_pose;
         pose = s_rotor.pose;
@@ -274,6 +315,17 @@ static void start_rotor(void)
     } else if (servo_driver_init(&servos) != ESP_OK) { /* refuses bad pulses or pins */
         ESP_LOGE(TAG, "Servos not started; tracking without moving the mount");
     }
+
+#if CONFIG_PLUTO_ENCODERS
+    s_pan_encoder_cal = (encoder_calibration_t){cal.pan_enc_zero, cal.pan_enc_dir};
+    s_tilt_encoder_cal = (encoder_calibration_t){cal.tilt_enc_zero, cal.tilt_enc_dir};
+    /* A failed init is logged and leaves the state without a measurement; the
+     * servos do not depend on the encoders. */
+    as5600_init(&s_pan_encoder, "pan", I2C_NUM_0,
+                CONFIG_PLUTO_ENCODER_PAN_SDA_GPIO, CONFIG_PLUTO_ENCODER_PAN_SCL_GPIO);
+    as5600_init(&s_tilt_encoder, "tilt", I2C_NUM_1,
+                CONFIG_PLUTO_ENCODER_TILT_SDA_GPIO, CONFIG_PLUTO_ENCODER_TILT_SCL_GPIO);
+#endif
 
     rotor_init(&s_rotor, &mount, CONFIG_PLUTO_EXPIRED_POINT_TOLERANCE_MS, &motion);
     s_rotor_lock = xSemaphoreCreateMutex();
