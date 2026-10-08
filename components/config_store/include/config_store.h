@@ -80,6 +80,16 @@ esp_err_t config_store_factory_reset(void);
 esp_err_t config_store_get_calibration(pluto_calibration_t *out);
 
 /**
+ * @brief Store the mount's calibration in NVS and in the copy the getter hands
+ * out.
+ *
+ * Checks nothing, like the getter: the caller validates first. The rotor and
+ * the servos keep what they read at boot, so a new calibration applies on the
+ * next restart.
+ */
+esp_err_t config_store_set_calibration(const pluto_calibration_t *in);
+
+/**
  * @brief Borrow the RAM cache instead of copying it.
  *
  * The returned pointer stays valid for the lifetime of the program, which some

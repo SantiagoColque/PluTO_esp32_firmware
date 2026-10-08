@@ -54,7 +54,8 @@
 static const char *TAG = "config_store";
 
 static pluto_config_t s_cache;
-/* Written only by config_store_init(), so readers need no lock. */
+/* Guarded by s_mutex, like s_cache: the dashboard writes it while main may be
+ * reading it in start_rotor(). */
 static pluto_calibration_t s_calibration;
 static SemaphoreHandle_t s_mutex;
 static bool s_initialized;
@@ -447,8 +448,50 @@ esp_err_t config_store_get_calibration(pluto_calibration_t *out)
         return ESP_ERR_INVALID_STATE;
     }
 
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
     *out = s_calibration;
+    xSemaphoreGive(s_mutex);
+
     return ESP_OK;
+}
+
+esp_err_t config_store_set_calibration(const pluto_calibration_t *in)
+{
+    nvs_handle_t handle;
+    esp_err_t err;
+
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    ESP_RETURN_ON_ERROR(nvs_open(CALIBRATION_NAMESPACE, NVS_READWRITE, &handle), TAG, "nvs_open");
+
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    err = write_calibration(handle, in);
+    if (err == ESP_OK) {
+        s_calibration = *in;
+    }
+    xSemaphoreGive(s_mutex);
+
+    nvs_close(handle);
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Calibration saved: az_ref=%ld pan=%ld..%ld tilt=%ld..%ld cdeg, "
+                      "pulses pan=%ld/%ld tilt=%ld/%ld us",
+                 (long)in->az_ref_cdeg,
+                 (long)in->pan_min_cdeg,
+                 (long)in->pan_max_cdeg,
+                 (long)in->tilt_min_cdeg,
+                 (long)in->tilt_max_cdeg,
+                 (long)in->pan_us_at_0,
+                 (long)in->pan_us_at_180,
+                 (long)in->tilt_us_at_0,
+                 (long)in->tilt_us_at_180);
+    } else {
+        ESP_LOGE(TAG, "Unable to save the calibration: %s", esp_err_to_name(err));
+    }
+
+    return err;
 }
 
 esp_err_t config_store_factory_reset(void)

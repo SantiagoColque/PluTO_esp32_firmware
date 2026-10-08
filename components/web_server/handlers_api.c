@@ -12,7 +12,9 @@
 #include "esp_check.h"
 #include "log_ring.h"
 #include "mqtt_manager.h"
+#include "pan_tilt.h"
 #include "sdkconfig.h"
+#include "servo_pulse.h"
 #include "sntp_manager.h"
 #include "web_server_private.h"
 #include "wifi_manager.h"
@@ -51,6 +53,24 @@ static void json_copy_string(const cJSON *root, const char *key, char *dest, siz
     if (cJSON_IsString(item) && item->valuestring != NULL && item->valuestring[0] != '\0') {
         strlcpy(dest, item->valuestring, dest_len);
     }
+}
+
+/**
+ * @brief Read a whole number out of a JSON object. False when the field is
+ *        absent, not a number, fractional or past the range of an int.
+ */
+static bool json_get_int32(const cJSON *root, const char *key, int32_t *out)
+{
+    const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+
+    /* cJSON also keeps every number as an int, truncated and saturated, so the
+     * two agree only for a whole number that fits. */
+    if (!cJSON_IsNumber(item) || (double)item->valueint != item->valuedouble) {
+        return false;
+    }
+
+    *out = item->valueint;
+    return true;
 }
 
 /* ---------------------------------------------------------------- status -- */
@@ -306,6 +326,124 @@ static esp_err_t admin_pass_post_handler(httpd_req_t *req)
     return web_send_json(req, "{\"ok\":true}");
 }
 
+/* ----------------------------------------------------------- calibration -- */
+
+static esp_err_t calibration_get_handler(httpd_req_t *req)
+{
+    pluto_calibration_t cal;
+    cJSON *root;
+    char *body;
+
+    if (web_require_auth(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    config_store_get_calibration(&cal);
+
+    root = cJSON_CreateObject();
+    if (root == NULL) {
+        return web_send_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    }
+
+    /* The keys are the field names of pluto_calibration_t, units included. */
+    cJSON_AddNumberToObject(root, "az_ref_cdeg", cal.az_ref_cdeg);
+    cJSON_AddNumberToObject(root, "pan_min_cdeg", cal.pan_min_cdeg);
+    cJSON_AddNumberToObject(root, "pan_max_cdeg", cal.pan_max_cdeg);
+    cJSON_AddNumberToObject(root, "tilt_min_cdeg", cal.tilt_min_cdeg);
+    cJSON_AddNumberToObject(root, "tilt_max_cdeg", cal.tilt_max_cdeg);
+    cJSON_AddNumberToObject(root, "pan_us_at_0", cal.pan_us_at_0);
+    cJSON_AddNumberToObject(root, "pan_us_at_180", cal.pan_us_at_180);
+    cJSON_AddNumberToObject(root, "tilt_us_at_0", cal.tilt_us_at_0);
+    cJSON_AddNumberToObject(root, "tilt_us_at_180", cal.tilt_us_at_180);
+
+    body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (body == NULL) {
+        return web_send_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    }
+
+    web_send_json(req, body);
+    free(body);
+
+    return ESP_OK;
+}
+
+static esp_err_t calibration_post_handler(httpd_req_t *req)
+{
+    pluto_calibration_t cal;
+    pan_tilt_config_t mount;
+    servo_calibration_t pan;
+    servo_calibration_t tilt;
+    cJSON *root;
+    char *body = NULL;
+    size_t body_len = 0;
+    bool complete;
+
+    if (web_require_auth(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    if (web_read_body(req, &body, &body_len) != ESP_OK) {
+        return web_send_error(req, HTTPD_400_BAD_REQUEST, "Unable to read the request body");
+    }
+
+    root = cJSON_ParseWithLength(body, body_len);
+    free(body);
+
+    if (root == NULL) {
+        return web_send_error(req, HTTPD_400_BAD_REQUEST, "Malformed JSON");
+    }
+
+    /* All fields are required, so no value is ever kept by omission. */
+    complete = json_get_int32(root, "az_ref_cdeg", &cal.az_ref_cdeg) &&
+               json_get_int32(root, "pan_min_cdeg", &cal.pan_min_cdeg) &&
+               json_get_int32(root, "pan_max_cdeg", &cal.pan_max_cdeg) &&
+               json_get_int32(root, "tilt_min_cdeg", &cal.tilt_min_cdeg) &&
+               json_get_int32(root, "tilt_max_cdeg", &cal.tilt_max_cdeg) &&
+               json_get_int32(root, "pan_us_at_0", &cal.pan_us_at_0) &&
+               json_get_int32(root, "pan_us_at_180", &cal.pan_us_at_180) &&
+               json_get_int32(root, "tilt_us_at_0", &cal.tilt_us_at_0) &&
+               json_get_int32(root, "tilt_us_at_180", &cal.tilt_us_at_180);
+    cJSON_Delete(root);
+
+    if (!complete) {
+        return web_send_error(req, HTTPD_400_BAD_REQUEST, "Every calibration field is required, as a whole number");
+    }
+
+    /* The checks start_rotor() makes at boot, made here as well so that a
+     * calibration that would keep the servos stopped is never stored. */
+    mount = (pan_tilt_config_t){
+        .az_ref_cdeg = cal.az_ref_cdeg,
+        .pan_min_cdeg = cal.pan_min_cdeg,
+        .pan_max_cdeg = cal.pan_max_cdeg,
+        .tilt_min_cdeg = cal.tilt_min_cdeg,
+        .tilt_max_cdeg = cal.tilt_max_cdeg,
+    };
+    pan = (servo_calibration_t){.us_at_0 = cal.pan_us_at_0, .us_at_180 = cal.pan_us_at_180};
+    tilt = (servo_calibration_t){.us_at_0 = cal.tilt_us_at_0, .us_at_180 = cal.tilt_us_at_180};
+
+    if (!pan_tilt_config_valid(&mount)) {
+        return web_send_error(req,
+                              HTTPD_400_BAD_REQUEST,
+                              "az_ref must be 0 to 35999, and each axis's min below its max within 0 to 18000");
+    }
+
+    if (!servo_calibration_valid(&pan) || !servo_calibration_valid(&tilt)) {
+        return web_send_error(req,
+                              HTTPD_400_BAD_REQUEST,
+                              "Each servo's two pulses must differ and lie within 500 to 2500 us");
+    }
+
+    if (config_store_set_calibration(&cal) != ESP_OK) {
+        return web_send_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Unable to save the calibration");
+    }
+
+    /* Not applied live: the rotor and the servo driver take it at boot. The
+     * restart is left to the user, so saving does not cut a pass short. */
+    return web_send_json(req, "{\"ok\":true,\"restart_required\":true}");
+}
+
 /* ------------------------------------------------------- reboot and reset -- */
 
 static esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -414,6 +552,8 @@ esp_err_t web_register_api_handlers(httpd_handle_t server)
         {.uri = "/api/reboot", .method = HTTP_POST, .handler = reboot_post_handler},
         {.uri = "/api/factory-reset", .method = HTTP_POST, .handler = factory_reset_post_handler},
         {.uri = "/api/logs", .method = HTTP_GET, .handler = logs_api_get_handler},
+        {.uri = "/api/calibration", .method = HTTP_GET, .handler = calibration_get_handler},
+        {.uri = "/api/calibration", .method = HTTP_POST, .handler = calibration_post_handler},
     };
 
     for (size_t i = 0; i < sizeof(handlers) / sizeof(handlers[0]); i++) {
