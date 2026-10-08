@@ -30,8 +30,8 @@ has a strange-looking bound, the reason is usually a specific RNF (see
    manager, the HTTP server and the event loop each run on their own task, so the
    dashboard stays reachable and reconnection keeps going for as long as it takes.
 6. SNTP. A missing clock is a warning, not a reboot — the poller keeps trying.
-7. `start_rotor()`: the stored calibration (checked, with a fallback), the servo
-   driver, the rotor state and the rotor task.
+7. `start_rotor()`: the stored calibration (an invalid one keeps the servos stopped),
+   the servo driver, the rotor state and the rotor task.
 8. `mqtt_manager_init()`, with `coordinates_message_handler` as the data callback.
 
 Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, its
@@ -62,9 +62,8 @@ Each is a standard IDF component under `components/`, with its public API in
   tilt limits and each servo's pulse at 0 and at 180 degrees) in a namespace of its own,
   `pluto_cal`, so that `config_store_factory_reset()`, which erases `pluto_cfg` to
   re-provision the WiFi, leaves it alone. It stores plain integers and checks nothing:
-  `start_rotor()` validates them with `pan_tilt_config_valid()` and
-  `servo_calibration_valid()`, and falls back to the default mount or to a servo's
-  nominal pulses with a warning.
+  `start_rotor()` checks the mount with `pan_tilt_config_valid()` and the driver checks
+  the pulses; if either is invalid the servos are not started.
 - **wifi_manager** — the state machine: `IDLE → CONNECTING → CONNECTED`, plus
   `PROVISIONING` (AP only, never configured) and `AP_FALLBACK` (AP up while the station
   keeps retrying). Reconnect backoff doubles from 1 s to `WIFI_RECONNECT_MAX_BACKOFF_SEC`
@@ -185,12 +184,11 @@ Until the dashboard can edit it (card 4b), changing a stored calibration on a bo
 setting menuconfig and booting once with `CONFIG_PLUTO_FORCE_KCONFIG_SEED`, which
 re-seeds the network settings too.
 
-The rest of the *"PluTO servos"* menu is compiled in and read by `start_rotor()` on every
-boot, so a change there means reflashing: the DS3218 version (270 degrees by default,
-the narrow range, until the servos are identified) and the signal pins (25 and 26,
-leaving 21/22 and 32/33 for the encoders' I2C). The version sets the pulses' defaults
-and the nominal pulses a servo falls back to when its stored pair is invalid. Once
-`sdkconfig` exists, changing it leaves the pulses saved there alone.
+The rest of the *"PluTO servos"* menu is compiled in, so a change there means
+reflashing: the signal pins (25 and 26, leaving 21/22 and 32/33 for the encoders' I2C)
+and the DS3218 version (270 degrees by default, the narrow range, until the servos are
+identified). The version only sets the pulses' defaults: once `sdkconfig` exists,
+changing it leaves the pulses saved there alone.
 
 ## Build and flash
 

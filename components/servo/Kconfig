@@ -28,9 +28,6 @@ menu "PluTO servos"
             the pulses only seed NVS, a board that already stored them needs
             PLUTO_FORCE_KCONFIG_SEED for one boot to take the new ones.
 
-            The version also picks the nominal pulses a servo falls back to
-            when its stored pair is invalid.
-
         config PLUTO_SERVO_DS3218_180
             bool "180 degrees"
 
@@ -72,8 +69,8 @@ menu "PluTO servos"
 
             Seeds NVS when it holds no calibration yet; afterwards the stored
             value wins, until PLUTO_FORCE_KCONFIG_SEED re-seeds it. A pair
-            outside 500..2500 us or with both points equal is ignored at boot
-            in favour of the nominal pulses, with a warning in the log.
+            with both points equal keeps the servos stopped, with an error in
+            the log.
 
     config PLUTO_SERVO_PAN_US_AT_180
         int "Pan pulse at 180 degrees (us)"

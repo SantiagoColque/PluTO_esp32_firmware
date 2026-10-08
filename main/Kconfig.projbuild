@@ -98,9 +98,8 @@ menu "PluTO Firmware Configuration"
             range 0 18000
             help
                 Lowest pan angle the mount may use. Must stay below the upper
-                limit: a calibration that breaks it is ignored at boot in
-                favour of the default mount (facing north, full ranges), with a
-                warning in the log.
+                limit: otherwise the servos are not started, with an error in
+                the log.
 
         config PLUTO_CAL_PAN_MAX_CDEG
             int "Pan upper limit (centidegrees)"
