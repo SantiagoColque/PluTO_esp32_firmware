@@ -25,6 +25,14 @@ and `device-state.md` for what the board reports.
 - **For a working system:** the PluTO server running, at least its Mosquitto broker. See
   [Registering with the server](#registering-with-the-server).
 
+## Wiring
+
+The pan servo's signal goes to GPIO25 and the tilt's to GPIO26 (see
+[Configuration](#configuration)), with the servos' ground tied to the ESP32's. Put a
+10 kΩ pull-down from each signal to GND: the pins float from reset until the firmware
+starts the servos, which never happens in the setup portal and waits for WiFi otherwise,
+and a floating input can make a powered servo twitch.
+
 ## Build
 
     git clone https://github.com/SantiagoColque/PluTO_esp32_firmware.git
