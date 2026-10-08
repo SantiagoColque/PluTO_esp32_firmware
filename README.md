@@ -295,8 +295,9 @@ updates.
 ## Known limitations
 
 - The setup network is open, and while it is up, the requests that arrive through it
-  skip the dashboard login. That includes changing the settings, a factory reset and
-  `/logs`. It stays up while a provisioned board is in fallback.
+  skip the dashboard login. That includes changing the settings and the mount
+  calibration, restarting the board, a factory reset and `/logs`. It stays up while a
+  provisioned board is in fallback.
 - The default dashboard password comes from the MAC, which the setup network's name and
   the MQTT topics reveal. Change it after provisioning.
 - The dashboard uses HTTP Basic Auth over plain HTTP. Only `mqtt://` has been used
