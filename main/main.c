@@ -38,6 +38,13 @@ static SemaphoreHandle_t s_rotor_lock;
 static rotor_mode_t s_reported_mode = ROTOR_MODE_IDLE;
 
 #if CONFIG_PLUTO_ENCODERS
+/* The AS5600's address is fixed, so each encoder gets a bus of its own, on
+ * pins clear of the servos and of the strapping and flash pins. */
+#define ENCODER_PAN_SDA_GPIO 21
+#define ENCODER_PAN_SCL_GPIO 22
+#define ENCODER_TILT_SDA_GPIO 32
+#define ENCODER_TILT_SCL_GPIO 33
+
 /* Used only by the rotor task, after start_rotor() sets them up. */
 static as5600_t s_pan_encoder;
 static as5600_t s_tilt_encoder;
@@ -322,9 +329,9 @@ static void start_rotor(void)
     /* A failed init is logged and leaves the state without a measurement; the
      * servos do not depend on the encoders. */
     as5600_init(&s_pan_encoder, "pan", I2C_NUM_0,
-                CONFIG_PLUTO_ENCODER_PAN_SDA_GPIO, CONFIG_PLUTO_ENCODER_PAN_SCL_GPIO);
+                ENCODER_PAN_SDA_GPIO, ENCODER_PAN_SCL_GPIO);
     as5600_init(&s_tilt_encoder, "tilt", I2C_NUM_1,
-                CONFIG_PLUTO_ENCODER_TILT_SDA_GPIO, CONFIG_PLUTO_ENCODER_TILT_SCL_GPIO);
+                ENCODER_TILT_SDA_GPIO, ENCODER_TILT_SCL_GPIO);
 #endif
 
     rotor_init(&s_rotor, &mount, CONFIG_PLUTO_EXPIRED_POINT_TOLERANCE_MS, &motion);

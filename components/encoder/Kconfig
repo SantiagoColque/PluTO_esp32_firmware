@@ -9,38 +9,8 @@ menu "PluTO encoders"
             Reads each axis from an AS5600 on an I2C bus of its own and
             reports the measured position and the tracking error in the state
             (meas and err_cdeg, device-state.md). Off, both go out as null and
-            nothing touches the I2C pins. Off until the encoders are mounted:
-            the chip is not confirmed yet.
-
-    config PLUTO_ENCODER_PAN_SDA_GPIO
-        int "Pan encoder SDA GPIO"
-        depends on PLUTO_ENCODERS
-        range 0 33
-        default 21
-        help
-            On I2C0. 34-39 are inputs only and cannot drive I2C. Keep clear
-            of the servo pins and of the strapping and flash pins listed
-            there.
-
-    config PLUTO_ENCODER_PAN_SCL_GPIO
-        int "Pan encoder SCL GPIO"
-        depends on PLUTO_ENCODERS
-        range 0 33
-        default 22
-
-    config PLUTO_ENCODER_TILT_SDA_GPIO
-        int "Tilt encoder SDA GPIO"
-        depends on PLUTO_ENCODERS
-        range 0 33
-        default 32
-        help
-            On I2C1: the AS5600's address is fixed, so the tilt cannot share
-            the pan's bus.
-
-    config PLUTO_ENCODER_TILT_SCL_GPIO
-        int "Tilt encoder SCL GPIO"
-        depends on PLUTO_ENCODERS
-        range 0 33
-        default 33
+            nothing touches the I2C pins (fixed in main.c: pan on 21/22, tilt
+            on 32/33). Off until the encoders are mounted: the chip is not
+            confirmed yet.
 
 endmenu

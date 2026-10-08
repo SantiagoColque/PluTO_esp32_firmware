@@ -214,10 +214,10 @@ The *"PluTO motion profile"* menu (`components/motion_profile/Kconfig`) is compi
 the same way: top speed, acceleration and rest timeout, one set for both axes, in
 degrees; `start_rotor()` converts them to centidegrees.
 
-So is *"PluTO encoders"* (`components/encoder/Kconfig`): `CONFIG_PLUTO_ENCODERS`, off by
-default, and the I2C pins (pan on 21/22, tilt on 32/33). Each encoder's zero and
-direction are part of the stored calibration, with no menuconfig seed: they start at 0
-and +1 and are set from the dashboard.
+So is *"PluTO encoders"* (`components/encoder/Kconfig`): only `CONFIG_PLUTO_ENCODERS`,
+off by default. The I2C pins are fixed in `main.c` (pan on 21/22, tilt on 32/33). Each
+encoder's zero and direction are part of the stored calibration, with no menuconfig
+seed: they start at 0 and +1 and are set from the dashboard.
 
 ## Build and flash
 
