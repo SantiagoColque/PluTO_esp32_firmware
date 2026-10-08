@@ -74,11 +74,9 @@ void rotor_init(rotor_t *rotor,
  * describe the outcome for the state channel. A HOLD is applied even without a
  * synced clock, since stopping never depends on the time.
  *
- * It updates the target but does not move: it runs on the MQTT task between
- * ticks, and a step here would come on top of the ones rotor_tick() takes. The
- * exception is an axis with no position yet, or a profile without limits:
- * either takes the target as is, so the first accepted batch sets pose right
- * away.
+ * It only updates the target: stepping the axes is rotor_tick()'s job. The
+ * first accepted batch is the exception, since there is no position to ramp
+ * from yet, and sets pose right away.
  */
 bool rotor_handle_payload(rotor_t *rotor,
                           const uint8_t *payload,
@@ -100,14 +98,9 @@ bool rotor_tick(rotor_t *rotor, int64_t now_ms, int32_t dt_ms);
 /**
  * @brief Whether the servo outputs can be released (HU-35).
  *
- * True before the first pose, and once both axes have stood still at the
- * same target for the profile's rest_after_ms. A different target, or any
- * target after a HOLD, turns it false as soon as it arrives, possibly before
- * the commanded angles change, so the driver has to be given the pose again
- * when this goes false even if rotor_tick() reports no change. A batch that
- * repeats the target the axes rest at leaves it true: nothing has to move.
- * It speaks for both axes together; main releases both outputs at once, and
- * whether one of them may sag under the antenna is still to be measured.
+ * True before the first pose and once both axes have been still at the same
+ * target for rest_after_ms; a new target, or any target after a HOLD, clears
+ * it at once.
  */
 bool rotor_outputs_resting(const rotor_t *rotor);
 

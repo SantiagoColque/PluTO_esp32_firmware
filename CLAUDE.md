@@ -106,21 +106,12 @@ The pointing pipeline is split the same way: pure components with host tests
 - **pan_tilt** — geographic az/el to the angles of two 180-degree servos, flipping past
   the zenith for the back half of the sky (`coordinates-dto.md` §9). Kinematics only:
   trims and pulses belong to `servo`.
-- **motion_profile** — per axis, in servo space: limits speed and acceleration (HU-36)
-  along a braking curve worked out step by step (with a steady tick it does not overshoot
-  a fixed target; `rotor` clamps to the mount), brakes at the acceleration limit after a
-  `HOLD`, and tells when an axis
-  has stood still at the same target for `rest_after_ms` (HU-35). Elapsed time is an
-  argument. With no position known (no encoders yet) the first target is taken as is.
-- **rotor** — the board's side of both contracts. Takes payloads, applies the rules that
-  need the clock and the mount (clock sync, expired points, reachability), follows the
-  trajectory through `motion_profile` and writes the JSON state. It keeps the target
-  apart from the commanded pose: the pan-tilt hysteresis goes by the target's mode, the
-  pose reports the mode it is physically in (`pan_tilt_pose_mode()`), and `az_cdeg` and
-  `el_cdeg` in the state are that commanded pose. A `HOLD` reports `holding` at once
-  while the axes brake; past the last point the mode stays `tracking` until both axes
-  arrive. Time comes in as arguments: the wall clock for the trajectory, a monotonic
-  `dt_ms` for the motion.
+- **motion_profile** — per axis, in servo space: speed and acceleration limits (HU-36), a
+  braking ramp after a `HOLD`, and when an axis has rested (HU-35). See its header.
+- **rotor** — the board's side of both contracts: takes payloads, applies the rules that
+  need the clock and the mount, follows the trajectory through `motion_profile`, clamps
+  the commanded pose to the mount and writes the JSON state, which reports that pose.
+  See its header.
 - **servo** — the two DS3218 on LEDC: 50 Hz, a 16-bit duty, one channel per servo.
   `servo_pulse` is the pure half: servo angle to pulse width with a two-point
   calibration per servo, which covers trim, scale, direction and the 270-degree version,
@@ -206,12 +197,8 @@ identified). The version only sets the pulses' defaults: once `sdkconfig` exists
 changing it leaves the pulses saved there alone.
 
 The *"PluTO motion profile"* menu (`components/motion_profile/Kconfig`) is compiled in
-the same way: top speed (`PLUTO_MOTION_MAX_SPEED_DEG_S`, 60 °/s), acceleration
-(`PLUTO_MOTION_MAX_ACCEL_DEG_S2`, 120 °/s²) and the rest timeout
-(`PLUTO_MOTION_REST_AFTER_MS`, 5 s), one set for both axes, in degrees for whoever tunes
-them; `start_rotor()` converts them to centidegrees. 0 turns a limit off, and a rest
-timeout of 0 keeps the servos driven forever. Speeds much below 20 °/s fall behind a
-high pass (`test_a_high_pass_keeps_up` in the rotor tests).
+the same way: top speed, acceleration and rest timeout, one set for both axes, in
+degrees; `start_rotor()` converts them to centidegrees.
 
 ## Build and flash
 
