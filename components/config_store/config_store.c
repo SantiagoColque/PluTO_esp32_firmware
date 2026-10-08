@@ -50,6 +50,10 @@
 #define KEY_CAL_PAN_US_AT_180 "pan_us180"
 #define KEY_CAL_TILT_US_AT_0 "tilt_us0"
 #define KEY_CAL_TILT_US_AT_180 "tilt_us180"
+#define KEY_CAL_PAN_ENC_ZERO "pan_enc_zero"
+#define KEY_CAL_PAN_ENC_DIR "pan_enc_dir"
+#define KEY_CAL_TILT_ENC_ZERO "tilt_enc_zero"
+#define KEY_CAL_TILT_ENC_DIR "tilt_enc_dir"
 
 static const char *TAG = "config_store";
 
@@ -132,6 +136,11 @@ static void apply_calibration_seed(pluto_calibration_t *cal)
     cal->pan_us_at_180 = CONFIG_PLUTO_SERVO_PAN_US_AT_180;
     cal->tilt_us_at_0 = CONFIG_PLUTO_SERVO_TILT_US_AT_0;
     cal->tilt_us_at_180 = CONFIG_PLUTO_SERVO_TILT_US_AT_180;
+    /* Measured once the encoders are mounted; until then, no offset and no reversal. */
+    cal->pan_enc_zero = 0;
+    cal->pan_enc_dir = 1;
+    cal->tilt_enc_zero = 0;
+    cal->tilt_enc_dir = 1;
 }
 
 /* One key per field, like pluto_cfg, so a field added later loads on a device
@@ -147,6 +156,10 @@ static esp_err_t write_calibration(nvs_handle_t handle, const pluto_calibration_
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_US_AT_180, cal->pan_us_at_180), TAG, "pan_us180");
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_US_AT_0, cal->tilt_us_at_0), TAG, "tilt_us0");
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_US_AT_180, cal->tilt_us_at_180), TAG, "tilt_us180");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_ENC_ZERO, cal->pan_enc_zero), TAG, "pan_enc_zero");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_ENC_DIR, cal->pan_enc_dir), TAG, "pan_enc_dir");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_ENC_ZERO, cal->tilt_enc_zero), TAG, "tilt_enc_zero");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_ENC_DIR, cal->tilt_enc_dir), TAG, "tilt_enc_dir");
 
     return nvs_commit(handle);
 }
@@ -201,6 +214,10 @@ static esp_err_t load_calibration(pluto_calibration_t *cal)
         load_i32(handle, KEY_CAL_PAN_US_AT_180, &cal->pan_us_at_180);
         load_i32(handle, KEY_CAL_TILT_US_AT_0, &cal->tilt_us_at_0);
         load_i32(handle, KEY_CAL_TILT_US_AT_180, &cal->tilt_us_at_180);
+        load_i32(handle, KEY_CAL_PAN_ENC_ZERO, &cal->pan_enc_zero);
+        load_i32(handle, KEY_CAL_PAN_ENC_DIR, &cal->pan_enc_dir);
+        load_i32(handle, KEY_CAL_TILT_ENC_ZERO, &cal->tilt_enc_zero);
+        load_i32(handle, KEY_CAL_TILT_ENC_DIR, &cal->tilt_enc_dir);
     }
 
     nvs_close(handle);
