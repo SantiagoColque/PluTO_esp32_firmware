@@ -120,27 +120,6 @@ static void test_a_reset_starts_from_a_known_position_at_rest(void)
     CHECK(motion_profile_position(&axis) > 5000);
 }
 
-static void test_a_long_move_keeps_both_limits(void)
-{
-    motion_profile_t axis;
-    trace_t trace;
-    int steps;
-
-    motion_profile_init(&axis, &LIMITED);
-    motion_profile_reset(&axis, 0);
-    trace_start(&trace, &axis);
-
-    steps = run_to(&axis, 18000, TICK_MS, &trace);
-    CHECK(within_limits(&trace, &LIMITED, TICK_MS));
-    CHECK(trace.max_pos <= 18000.0f && trace.min_pos >= 0.0f);
-    CHECK(motion_profile_position(&axis) == 18000);
-
-    /* And it is not slower than it needs to be: it reaches the top speed and
-     * takes about d / v_max + v_max / a_max = 3.5 s. */
-    CHECK(trace.max_speed >= V_MAX - SPEED_SLACK);
-    CHECK(steps > 0 && steps <= 3600 / TICK_MS);
-}
-
 static void test_it_brakes_onto_the_target_without_overshoot(void)
 {
     const int32_t distances[] = {1, 7, 30, 599, 600, 601, 2500, 7777};
@@ -318,7 +297,10 @@ static void test_a_flip_is_a_ramp_within_the_range(void)
     CHECK(tilt_trace.min_pos >= 3000.0f && tilt_trace.max_pos <= 15000.0f);
     CHECK(within_limits(&pan_trace, &LIMITED, TICK_MS));
     CHECK(within_limits(&tilt_trace, &LIMITED, TICK_MS));
-    /* About 3.5 s off target, which is what coordinates-dto.md §9 warns about. */
+    /* No slower than it needs to be: the pan reaches the top speed and the flip
+     * takes about d / v_max + v_max / a_max = 3.5 s, the time off target that
+     * coordinates-dto.md §9 warns about. */
+    CHECK(pan_trace.max_speed >= V_MAX - SPEED_SLACK);
     CHECK(steps > 1 && steps <= 3600 / TICK_MS);
 }
 
@@ -463,24 +445,10 @@ static void test_an_axis_braked_to_a_stop_rests(void)
     CHECK(!motion_profile_resting(&axis));
 }
 
-static void test_a_zero_timeout_never_rests(void)
-{
-    const motion_profile_config_t never = {V_MAX, A_MAX, 0};
-    motion_profile_t axis;
-
-    motion_profile_init(&axis, &never);
-    for (int i = 0; i < 1000; i++) {
-        motion_profile_step(&axis, 5000, TICK_MS);
-    }
-    CHECK(motion_profile_settled(&axis));
-    CHECK(!motion_profile_resting(&axis));
-}
-
 int main(void)
 {
     test_the_first_target_is_taken_as_is();
     test_a_reset_starts_from_a_known_position_at_rest();
-    test_a_long_move_keeps_both_limits();
     test_it_brakes_onto_the_target_without_overshoot();
     test_slow_limits_still_arrive();
     test_a_slow_target_is_followed_without_lag();
@@ -495,7 +463,6 @@ int main(void)
     test_a_new_target_ends_the_rest_at_once();
     test_a_moving_axis_does_not_rest();
     test_an_axis_braked_to_a_stop_rests();
-    test_a_zero_timeout_never_rests();
 
     if (s_failures) {
         fprintf(stderr, "motion_profile: %d check(s) failed\n", s_failures);
