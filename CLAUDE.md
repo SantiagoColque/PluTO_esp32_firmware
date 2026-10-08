@@ -41,11 +41,9 @@ Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, i
   `s_rotor_lock`. The rotor decodes and validates it, loads the trajectory and moves its
   pose to the current target right away; the handler then publishes the state.
 - `rotor_task` runs every 50 ms. `rotor_tick()` follows the trajectory and turns az/el
-  into pan/tilt angles, and every pose that differs from the last one sent goes to
-  `servo_driver_set()`, outside the lock. **This is where the servos are driven**, and
-  it compares against the last pose sent rather than using `rotor_tick()`'s return
-  value: the handler's own tick consumes the change a new batch makes, so a
-  single-point batch would never move the servos (see `rotor.h`).
+  into pan/tilt angles, and the pose goes to `servo_driver_set()` on every tick, outside
+  the lock. **This is where the servos are driven**; the driver skips a duty it already
+  has.
 - The same task publishes the state on `device/<device_id>/state`: every second while
   tracking, every ten at rest, and at once when the mode changes.
 
@@ -107,8 +105,9 @@ The pointing pipeline is split the same way: pure components with host tests
   calibration per servo, which covers trim, scale, direction and the 270-degree version,
   and a hard 500–2500 µs clamp. `servo_driver` is the LEDC half. Pins and calibration
   come in through `servo_driver_init()` (the driver never reads Kconfig), and no pulse
-  goes out until the first pose. `servo_driver_release()` stops the pulses for HU-35,
-  but nothing calls it yet. Not yet checked on hardware.
+  goes out until the first pose. `servo_driver_release()` stops the pulses for HU-35
+  (duty 0, so no pulse is cut short), but nothing calls it yet. Not yet checked on
+  hardware.
 
 ## HTTP API
 

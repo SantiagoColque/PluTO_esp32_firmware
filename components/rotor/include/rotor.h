@@ -71,11 +71,7 @@ bool rotor_handle_payload(rotor_t *rotor,
 /**
  * @brief Advance to now_ms: recompute the target, the servo angles and the mode.
  *
- * Returns true when this call changed the commanded angles. That is not the
- * signal to move the servos: rotor_handle_payload() runs a tick of its own, so
- * the pose an accepted batch sets is never reported by a later tick, and a
- * single-point batch never reports one at all. Whoever drives the servos
- * compares has_pose and pose against what it last sent.
+ * Returns true when this call changed the commanded angles.
  */
 bool rotor_tick(rotor_t *rotor, int64_t now_ms);
 
