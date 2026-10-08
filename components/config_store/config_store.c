@@ -494,7 +494,7 @@ esp_err_t config_store_set_calibration(const pluto_calibration_t *in)
 
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "Calibration saved: az_ref=%ld pan=%ld..%ld tilt=%ld..%ld cdeg, "
-                      "pulses pan=%ld/%ld tilt=%ld/%ld us",
+                      "pulses pan=%ld/%ld tilt=%ld/%ld us, encoders pan=%ld/%+ld tilt=%ld/%+ld",
                  (long)in->az_ref_cdeg,
                  (long)in->pan_min_cdeg,
                  (long)in->pan_max_cdeg,
@@ -503,7 +503,11 @@ esp_err_t config_store_set_calibration(const pluto_calibration_t *in)
                  (long)in->pan_us_at_0,
                  (long)in->pan_us_at_180,
                  (long)in->tilt_us_at_0,
-                 (long)in->tilt_us_at_180);
+                 (long)in->tilt_us_at_180,
+                 (long)in->pan_enc_zero,
+                 (long)in->pan_enc_dir,
+                 (long)in->tilt_enc_zero,
+                 (long)in->tilt_enc_dir);
     } else {
         ESP_LOGE(TAG, "Unable to save the calibration: %s", esp_err_to_name(err));
     }

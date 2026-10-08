@@ -151,6 +151,15 @@ summary{cursor:pointer;color:var(--muted);font-size:13px;padding:6px 0}
         <div><label for="tilt_us180">Tilt pulse at 180° (µs)</label><input id="tilt_us180" name="tilt_us_at_180" type="number" min="500" max="2500" step="1" required></div>
       </div>
       <div class="hint">The pulse that puts each servo at 0° and the one that puts it at 180°, different and within 500–2500 µs.</div>
+      <div class="pair">
+        <div><label for="pan_enc_zero">Pan encoder zero</label><input id="pan_enc_zero" name="pan_enc_zero" type="number" min="0" max="4095" step="1" required></div>
+        <div><label for="pan_enc_dir">Pan count toward 180°</label><select id="pan_enc_dir" name="pan_enc_dir"><option value="1">Grows</option><option value="-1">Shrinks</option></select></div>
+      </div>
+      <div class="pair">
+        <div><label for="tilt_enc_zero">Tilt encoder zero</label><input id="tilt_enc_zero" name="tilt_enc_zero" type="number" min="0" max="4095" step="1" required></div>
+        <div><label for="tilt_enc_dir">Tilt count toward 180°</label><select id="tilt_enc_dir" name="tilt_enc_dir"><option value="1">Grows</option><option value="-1">Shrinks</option></select></div>
+      </div>
+      <div class="hint">The raw count, 0–4095, each encoder reads with its servo at 0°, and which way it goes from there. Only a build with the encoders uses them.</div>
       <div class="msg" id="calmsg"></div>
       <button type="submit" id="calsave">Save calibration</button>
       <button type="button" class="ghost" id="calreboot">Restart to apply</button>

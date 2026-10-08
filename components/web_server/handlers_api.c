@@ -5,6 +5,7 @@
 
 #include "cJSON.h"
 #include "config_store.h"
+#include "encoder_angle.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -328,6 +329,12 @@ static esp_err_t admin_pass_post_handler(httpd_req_t *req)
 
 /* ----------------------------------------------------------- calibration -- */
 
+/* encoder_angle_cdeg() would take any value, but only these mean something. */
+static bool encoder_cal_valid(int32_t zero_raw, int32_t dir)
+{
+    return zero_raw >= 0 && zero_raw < ENCODER_COUNTS && (dir == 1 || dir == -1);
+}
+
 static esp_err_t calibration_get_handler(httpd_req_t *req)
 {
     pluto_calibration_t cal;
@@ -355,6 +362,10 @@ static esp_err_t calibration_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "pan_us_at_180", cal.pan_us_at_180);
     cJSON_AddNumberToObject(root, "tilt_us_at_0", cal.tilt_us_at_0);
     cJSON_AddNumberToObject(root, "tilt_us_at_180", cal.tilt_us_at_180);
+    cJSON_AddNumberToObject(root, "pan_enc_zero", cal.pan_enc_zero);
+    cJSON_AddNumberToObject(root, "pan_enc_dir", cal.pan_enc_dir);
+    cJSON_AddNumberToObject(root, "tilt_enc_zero", cal.tilt_enc_zero);
+    cJSON_AddNumberToObject(root, "tilt_enc_dir", cal.tilt_enc_dir);
 
     body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -404,7 +415,11 @@ static esp_err_t calibration_post_handler(httpd_req_t *req)
                json_get_int32(root, "pan_us_at_0", &cal.pan_us_at_0) &&
                json_get_int32(root, "pan_us_at_180", &cal.pan_us_at_180) &&
                json_get_int32(root, "tilt_us_at_0", &cal.tilt_us_at_0) &&
-               json_get_int32(root, "tilt_us_at_180", &cal.tilt_us_at_180);
+               json_get_int32(root, "tilt_us_at_180", &cal.tilt_us_at_180) &&
+               json_get_int32(root, "pan_enc_zero", &cal.pan_enc_zero) &&
+               json_get_int32(root, "pan_enc_dir", &cal.pan_enc_dir) &&
+               json_get_int32(root, "tilt_enc_zero", &cal.tilt_enc_zero) &&
+               json_get_int32(root, "tilt_enc_dir", &cal.tilt_enc_dir);
     cJSON_Delete(root);
 
     if (!complete) {
@@ -433,6 +448,13 @@ static esp_err_t calibration_post_handler(httpd_req_t *req)
         return web_send_error(req,
                               HTTPD_400_BAD_REQUEST,
                               "Each servo's two pulses must differ and lie within 500 to 2500 us");
+    }
+
+    if (!encoder_cal_valid(cal.pan_enc_zero, cal.pan_enc_dir) ||
+        !encoder_cal_valid(cal.tilt_enc_zero, cal.tilt_enc_dir)) {
+        return web_send_error(req,
+                              HTTPD_400_BAD_REQUEST,
+                              "Each encoder's zero must lie within 0 to 4095, and its direction be 1 or -1");
     }
 
     if (config_store_set_calibration(&cal) != ESP_OK) {
