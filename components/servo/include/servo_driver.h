@@ -34,8 +34,8 @@ typedef struct {
  *
  * No pulse leaves either pin until the first servo_driver_set(): both lines
  * stay low, so the servos do not lurch to some default angle at boot.
- * Returns ESP_ERR_INVALID_ARG for an invalid calibration, a pin that is unsafe
- * or shared by both servos, and ESP_ERR_INVALID_STATE if already started.
+ * Returns ESP_ERR_INVALID_ARG for an invalid calibration or a pin that is
+ * unsafe or shared by both servos. Call it once.
  */
 esp_err_t servo_driver_init(const servo_driver_config_t *config);
 
@@ -44,16 +44,19 @@ esp_err_t servo_driver_init(const servo_driver_config_t *config);
  *
  * A channel whose duty is unchanged is left alone, so calling this with the
  * same pose again is cheap. After servo_driver_release() it resumes the
- * pulses, even for the pose the servos had before.
+ * pulses, even for the pose the servos had before. Fails only with
+ * ESP_ERR_INVALID_STATE, when servo_driver_init() did not succeed.
  */
 esp_err_t servo_driver_set(int32_t pan_cdeg, int32_t tilt_cdeg);
 
 /**
  * @brief Stop the pulses on both servos and hold the lines low.
  *
- * Meant for the rest state of HU-35: a servo without pulses usually stops
- * holding its position and draws far less, although whether the DS3218 does
- * is still to be seen on the bench. The next servo_driver_set() resumes them.
+ * The pulse in flight finishes first, so no short pulse leaves the pin. Meant
+ * for the rest state of HU-35: a servo without pulses usually stops holding
+ * its position and draws far less, although whether the DS3218 does is still
+ * to be seen on the bench. The next servo_driver_set() resumes them. Fails
+ * only like servo_driver_set().
  */
 esp_err_t servo_driver_release(void);
 

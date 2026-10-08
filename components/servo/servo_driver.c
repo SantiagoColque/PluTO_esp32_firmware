@@ -20,8 +20,7 @@ static const char *TAG = "servo";
 typedef struct {
     ledc_channel_t channel;
     servo_calibration_t calibration;
-    uint32_t duty;  /* last duty written, meaningful while active */
-    bool active;    /* pulses going out; false from init and after a release */
+    uint32_t duty; /* last duty written; 0 means no pulses (a real pulse is never 0) */
 } servo_axis_t;
 
 static servo_axis_t s_pan = {.channel = LEDC_CHANNEL_0};
@@ -85,39 +84,20 @@ static esp_err_t start_channel(servo_axis_t *axis, const servo_axis_config_t *co
 
     axis->calibration = config->calibration;
     axis->duty = 0;
-    axis->active = false;
     return ledc_channel_config(&channel);
 }
 
-static esp_err_t stop_axis(servo_axis_t *axis)
+/* The new duty is latched at the end of the current frame, so the pulse in
+ * flight is never cut short. That is why a release writes duty 0 instead of
+ * calling ledc_stop(), which can truncate a pulse below 500 us. Once LEDC is
+ * configured these calls only fail on bad arguments, and these are constant. */
+static void write_duty(servo_axis_t *axis, uint32_t duty)
 {
-    esp_err_t err = ledc_stop(SERVO_SPEED_MODE, axis->channel, 0);
-
-    if (err == ESP_OK) {
-        axis->active = false;
-    }
-    return err;
-}
-
-static esp_err_t drive_axis(servo_axis_t *axis, int32_t cdeg)
-{
-    uint32_t duty = servo_pulse_duty(servo_pulse_us(&axis->calibration, cdeg));
-    esp_err_t err;
-
-    if (axis->active && duty == axis->duty) {
-        return ESP_OK;
-    }
-
-    err = ledc_set_duty(SERVO_SPEED_MODE, axis->channel, duty);
-    if (err == ESP_OK) {
-        /* Also what turns the output back on after ledc_stop(). */
-        err = ledc_update_duty(SERVO_SPEED_MODE, axis->channel);
-    }
-    if (err == ESP_OK) {
+    if (duty != axis->duty) {
+        ledc_set_duty(SERVO_SPEED_MODE, axis->channel, duty);
+        ledc_update_duty(SERVO_SPEED_MODE, axis->channel);
         axis->duty = duty;
-        axis->active = true;
     }
-    return err;
 }
 
 esp_err_t servo_driver_init(const servo_driver_config_t *config)
@@ -131,8 +111,6 @@ esp_err_t servo_driver_init(const servo_driver_config_t *config)
     };
     esp_err_t err;
 
-    ESP_RETURN_ON_FALSE(config != NULL, ESP_ERR_INVALID_ARG, TAG, "no configuration");
-    ESP_RETURN_ON_FALSE(!s_started, ESP_ERR_INVALID_STATE, TAG, "already started");
     /* Everything is checked before LEDC is touched, so a bad configuration
      * never puts out a single pulse. */
     err = check_axis("pan", &config->pan);
@@ -149,11 +127,6 @@ esp_err_t servo_driver_init(const servo_driver_config_t *config)
     ESP_RETURN_ON_ERROR(start_channel(&s_pan, &config->pan), TAG, "pan channel");
     ESP_RETURN_ON_ERROR(start_channel(&s_tilt, &config->tilt), TAG, "tilt channel");
 
-    /* The same state a release leaves, so "never driven" and "released"
-     * are one case for servo_driver_set(). */
-    ESP_RETURN_ON_ERROR(stop_axis(&s_pan), TAG, "pan channel");
-    ESP_RETURN_ON_ERROR(stop_axis(&s_tilt), TAG, "tilt channel");
-
     s_started = true;
     ESP_LOGI(TAG, "Pan on GPIO%d (%ld..%ld us), tilt on GPIO%d (%ld..%ld us); idle until the first pose",
              config->pan.gpio_num, (long)config->pan.calibration.us_at_0,
@@ -164,32 +137,20 @@ esp_err_t servo_driver_init(const servo_driver_config_t *config)
 
 esp_err_t servo_driver_set(int32_t pan_cdeg, int32_t tilt_cdeg)
 {
-    esp_err_t err;
-
     if (!s_started) {
         return ESP_ERR_INVALID_STATE;
     }
-
-    /* No logging here: this runs on every pose change, and the caller
-     * decides how loudly to report a failure. */
-    err = drive_axis(&s_pan, pan_cdeg);
-    if (err == ESP_OK) {
-        err = drive_axis(&s_tilt, tilt_cdeg);
-    }
-    return err;
+    write_duty(&s_pan, servo_pulse_duty(servo_pulse_us(&s_pan.calibration, pan_cdeg)));
+    write_duty(&s_tilt, servo_pulse_duty(servo_pulse_us(&s_tilt.calibration, tilt_cdeg)));
+    return ESP_OK;
 }
 
 esp_err_t servo_driver_release(void)
 {
-    esp_err_t pan_err;
-    esp_err_t tilt_err;
-
     if (!s_started) {
         return ESP_ERR_INVALID_STATE;
     }
-
-    /* Both, even if the first fails: a servo left pulsing is the worse outcome. */
-    pan_err = stop_axis(&s_pan);
-    tilt_err = stop_axis(&s_tilt);
-    return pan_err != ESP_OK ? pan_err : tilt_err;
+    write_duty(&s_pan, 0);
+    write_duty(&s_tilt, 0);
+    return ESP_OK;
 }
