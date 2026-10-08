@@ -33,6 +33,11 @@ The pan servo's signal goes to GPIO25 and the tilt's to GPIO26 (see
 starts the servos, which never happens in the setup portal and waits for WiFi otherwise,
 and a floating input can make a powered servo twitch.
 
+The encoders are optional and only read by a build with `PLUTO_ENCODERS` on: one AS5600
+per axis, each on its own I2C bus because the chip's address is fixed. By default pan
+goes to SDA GPIO21 / SCL GPIO22 and tilt to SDA GPIO32 / SCL GPIO33. Power them from
+3V3, never 5 V, and add 2.2–4.7 kΩ pull-ups from SDA and SCL to 3V3.
+
 ## Build
 
     git clone https://github.com/SantiagoColque/PluTO_esp32_firmware.git
@@ -131,10 +136,28 @@ way to deploy one: leave `WIFI_SSID` empty in menuconfig, which is the default.
    the default one.
 
 On the local network the dashboard shows the board's status and edits the same settings
-as the portal. Saving restarts the board.
+as the portal. Saving restarts the board. It also edits the mount calibration: see
+[Calibrating the mount](#calibrating-the-mount).
 
 For development, set `WIFI_SSID`, `WIFI_PASSWORD` and the broker in menuconfig before
 the first flash: the board then joins directly, without the portal.
+
+## Calibrating the mount
+
+The dashboard's **Mount calibration** section edits the calibration stored on the board
+(`GET` and `POST /api/calibration`, all fields at once):
+
+- **az_ref**, the geographic azimuth the pan faces at 0°, and the usable range of each
+  joint, in degrees;
+- each servo's pulse at 0° and at 180°, in µs (500–2500); swap them to reverse a servo;
+- each encoder's zero, the raw count (0–4095) it reads with its servo at 0°, and whether
+  the count grows or shrinks toward 180°. They start at 0 and *grows*. To find the zero,
+  put the servo at 0° and restart: the log prints `pan encoder reading, raw N` on the
+  first good read.
+
+The board refuses values out of range, so a stored calibration never keeps the servos
+stopped. **Save calibration** stores them; they apply after a restart, which the board
+leaves to you (**Restart to apply**) so that saving does not cut a pass short.
 
 ## Registering with the server
 
@@ -156,7 +179,9 @@ To watch the board from the server side:
     mosquitto_sub -h <server address> -p 1883 -u pluto -P <password> -t 'device/#' -v
 
 The `coordinates/polar` payload is binary (`coordinates-dto.md`), so it shows up as
-noise.
+noise. Each `state` document reports the commanded pose and, in a build with the encoders,
+the measured position (`meas`) and its error against the target (`err_cdeg`); otherwise
+both are `null` (`device-state.md`).
 
 ## Recovery
 
@@ -180,7 +205,7 @@ later. It works from the setup network too, where it asks for no login.
 
 | Erased | Kept |
 |---|---|
-| WiFi network and password, and the WiFi driver's own copy of them | The mount calibration: `az_ref`, the pan and tilt limits and the servo pulses (NVS namespace `pluto_cal`) |
+| WiFi network and password, and the WiFi driver's own copy of them | The mount calibration: `az_ref`, the pan and tilt limits, the servo pulses and the encoders' zero and direction (NVS namespace `pluto_cal`) |
 | Broker URI, username and password | The firmware |
 | NTP server and time zone | |
 | Dashboard password, which goes back to the MAC default | |
@@ -199,15 +224,13 @@ menuconfig.
 
 ## Configuration
 
-`idf.py menuconfig` has three PluTO menus: **PluTO Firmware Configuration** (with its
+`idf.py menuconfig` has four PluTO menus: **PluTO Firmware Configuration** (with its
 submenu **Mount calibration (first-boot seed)**), and **Component config > PluTO
-servos** and **> PluTO motion profile**. Each option is `CONFIG_<name>` in `sdkconfig`.
+servos**, **> PluTO motion profile** and **> PluTO encoders**. Each option is
+`CONFIG_<name>` in `sdkconfig`.
 
 - **Seed** options are written to NVS on the first boot of a blank board; after that the
-  stored value wins. Network settings are edited from the dashboard. The calibration
-  cannot be edited on a running board yet (card 4b): set the new values, flash and boot
-  once with `PLUTO_FORCE_KCONFIG_SEED`, then flash again without it. That also resets
-  the network settings and the dashboard password.
+  stored value wins, and the dashboard edits it.
 - **Build** options are compiled in: change, rebuild, flash.
 
 | Option | Default | Kind | What it does |
@@ -242,6 +265,10 @@ servos** and **> PluTO motion profile**. Each option is `CONFIG_<name>` in `sdkc
 | `PLUTO_MOTION_MAX_SPEED_DEG_S` | 60 (1–600) | Build | Top speed of each axis (HU-36). |
 | `PLUTO_MOTION_MAX_ACCEL_DEG_S2` | 120 (1–5000) | Build | Top acceleration and braking of each axis. |
 | `PLUTO_MOTION_REST_AFTER_MS` | 5000 (0–3600000) | Build | Stillness before the servo outputs are released (HU-35); 0 never. |
+| **Component config > PluTO encoders** | | | |
+| `PLUTO_ENCODERS` | off | Build | Read each axis from an AS5600 and report `meas` and `err_cdeg`. |
+| `PLUTO_ENCODER_PAN_SDA_GPIO`, `PLUTO_ENCODER_PAN_SCL_GPIO` | 21, 22 | Build | Pan encoder's I2C pins (I2C0). |
+| `PLUTO_ENCODER_TILT_SDA_GPIO`, `PLUTO_ENCODER_TILT_SCL_GPIO` | 32, 33 | Build | Tilt encoder's I2C pins (I2C1). |
 
 ## Host tests
 
@@ -260,10 +287,11 @@ lines of this firmware's own log, so a board can be debugged without a serial ca
 - reconnecting within 60 s after a real outage (RNF-06.1);
 - flashing with esptool alone, with the merged image or the three images;
 - everything that moves the mount: the servo output on LEDC, the calibration stored in
-  NVS, and the motion profile with the release at rest.
+  NVS, and the motion profile with the release at rest;
+- the encoders and the measured position; the chip (AS5600) is not confirmed yet.
 
-Not implemented yet: the encoders and the zero calibration, telemetry of the measured
-position, and OTA updates.
+Not implemented yet: capturing the encoders' zero on the board (it is typed in), and OTA
+updates.
 
 ## Known limitations
 

@@ -31,7 +31,7 @@ has a strange-looking bound, the reason is usually a specific RNF (see
    dashboard stays reachable and reconnection keeps going for as long as it takes.
 6. SNTP. A missing clock is a warning, not a reboot — the poller keeps trying.
 7. `start_rotor()`: the stored calibration (an invalid one keeps the servos stopped),
-   the servo driver, the rotor state and the rotor task.
+   the servo driver, the encoders if built in, the rotor state and the rotor task.
 8. `mqtt_manager_init()`, with `coordinates_message_handler` as the data callback.
 
 Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, its
@@ -256,9 +256,9 @@ server's encoder, which the decoder's host test must read back. After a change t
 Roughly in the order the SRS prioritizes them:
 
 - **Homing / zero calibration** (HU-28). With absolute encoders it is capturing an
-  offset, not searching for one, and it waits on the encoder driver. Also missing: the
-  MQTT command that triggers it (its topic is to be agreed in the server's contracts)
-  and a dashboard jog to move a servo by hand.
+  offset, not searching for one; today each encoder's zero is typed into the dashboard.
+  Missing: capturing it on the board, the MQTT command that triggers it (its topic is to
+  be agreed in the server's contracts) and a dashboard jog to move a servo by hand.
 - **Bench tuning of the motion profile**: the speed, acceleration and rest timeout are
   compile-time and shared by both axes, and the rest state cuts both outputs at once.
   Whether the DS3218 holds the tilt under the antenna without pulses, and so which
