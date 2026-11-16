@@ -1,0 +1,29 @@
+name: ci
+
+# The job ids (host-tests, build) are the check names a ruleset requires.
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      # CFLAGS stays unset: the Makefiles use ?= and an inherited value drops the sanitizers.
+      - run: for d in components/*/test_host; do make -C "$d" || exit 1; done
+
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          # Pinned: IDF 6 dropped json and mqtt; a bump goes in its own PR.
+          esp_idf_version: v5.5.2
