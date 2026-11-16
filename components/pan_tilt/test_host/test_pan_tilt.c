@@ -141,6 +141,124 @@ static void test_the_inverse_recovers_the_target(void)
     }
 }
 
+static void test_the_default_config_is_valid(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+
+    CHECK(pan_tilt_config_valid(&cfg));
+}
+
+static void test_a_narrowed_and_turned_mount_is_valid(void)
+{
+    pan_tilt_config_t cfg = {.az_ref_cdeg = 21550,
+                             .pan_min_cdeg = 1000,
+                             .pan_max_cdeg = 17000,
+                             .tilt_min_cdeg = 500,
+                             .tilt_max_cdeg = 12000};
+
+    CHECK(pan_tilt_config_valid(&cfg));
+}
+
+static void test_az_ref_must_be_a_heading(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+
+    cfg.az_ref_cdeg = 35999;
+    CHECK(pan_tilt_config_valid(&cfg));
+    /* 360 degrees is north again; only the 0 spelling is accepted, so a stored
+     * value has a single meaning. */
+    cfg.az_ref_cdeg = 36000;
+    CHECK(!pan_tilt_config_valid(&cfg));
+    cfg.az_ref_cdeg = -1;
+    CHECK(!pan_tilt_config_valid(&cfg));
+    cfg.az_ref_cdeg = INT32_MIN;
+    CHECK(!pan_tilt_config_valid(&cfg));
+}
+
+static void test_limits_must_fit_a_180_degree_servo(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+
+    cfg.pan_min_cdeg = -1;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.pan_max_cdeg = 18001;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.tilt_min_cdeg = -1;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.tilt_max_cdeg = 18001;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.pan_max_cdeg = INT32_MAX;
+    cfg.tilt_min_cdeg = INT32_MIN;
+    CHECK(!pan_tilt_config_valid(&cfg));
+}
+
+static void test_each_range_must_be_open(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+
+    /* An empty range would make every batch unreachable, which looks like a
+     * server bug from the other side. */
+    cfg.pan_min_cdeg = 9000;
+    cfg.pan_max_cdeg = 9000;
+    CHECK(!pan_tilt_config_valid(&cfg));
+    cfg.pan_min_cdeg = 9001;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.tilt_min_cdeg = 9000;
+    cfg.tilt_max_cdeg = 9000;
+    CHECK(!pan_tilt_config_valid(&cfg));
+    cfg.tilt_min_cdeg = 9001;
+    CHECK(!pan_tilt_config_valid(&cfg));
+
+    cfg = PAN_TILT_CONFIG_DEFAULT;
+    cfg.pan_min_cdeg = 17999;
+    cfg.tilt_max_cdeg = 1;
+    CHECK(pan_tilt_config_valid(&cfg)); /* narrow, but not empty */
+}
+
+static void test_a_missing_config_is_invalid(void)
+{
+    CHECK(!pan_tilt_config_valid(NULL));
+}
+
+static void test_a_pose_between_modes_reports_where_it_points(void)
+{
+    pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
+    /* Halfway through a flip toward due west at 30 degrees: the tilt is already
+     * past the zenith while the label still says normal. */
+    pan_tilt_pose_t pose = {.pan_cdeg = 9000, .tilt_cdeg = 12000, .mode = PAN_TILT_NORMAL};
+    int32_t az;
+    int32_t el;
+
+    CHECK(pan_tilt_pose_mode(&pose) == PAN_TILT_FLIPPED);
+    pan_tilt_to_azel(&cfg, &pose, &az, &el);
+    CHECK(az == 27000 && el == 6000);
+
+    /* And the other way round, a flipped label still in front of the zenith. */
+    pose = (pan_tilt_pose_t){.pan_cdeg = 9000, .tilt_cdeg = 6000, .mode = PAN_TILT_FLIPPED};
+    CHECK(pan_tilt_pose_mode(&pose) == PAN_TILT_NORMAL);
+    pan_tilt_to_azel(&cfg, &pose, &az, &el);
+    CHECK(az == 9000 && el == 6000);
+}
+
+static void test_on_the_zenith_the_label_decides(void)
+{
+    pan_tilt_pose_t pose = {.pan_cdeg = 4500, .tilt_cdeg = 9000, .mode = PAN_TILT_NORMAL};
+
+    CHECK(pan_tilt_pose_mode(&pose) == PAN_TILT_NORMAL);
+    pose.mode = PAN_TILT_FLIPPED;
+    CHECK(pan_tilt_pose_mode(&pose) == PAN_TILT_FLIPPED);
+}
+
 int main(void)
 {
     test_front_half_uses_the_normal_mode();
@@ -152,6 +270,14 @@ int main(void)
     test_narrowed_servo_ranges_are_enforced();
     test_the_default_config_covers_the_whole_sky();
     test_the_inverse_recovers_the_target();
+    test_the_default_config_is_valid();
+    test_a_narrowed_and_turned_mount_is_valid();
+    test_az_ref_must_be_a_heading();
+    test_limits_must_fit_a_180_degree_servo();
+    test_each_range_must_be_open();
+    test_a_missing_config_is_invalid();
+    test_a_pose_between_modes_reports_where_it_points();
+    test_on_the_zenith_the_label_decides();
 
     if (s_failures) {
         fprintf(stderr, "pan_tilt: %d check(s) failed\n", s_failures);

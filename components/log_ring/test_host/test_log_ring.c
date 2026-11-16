@@ -176,7 +176,7 @@ static void test_control_characters_become_spaces(void)
 static void test_only_our_tags(void)
 {
     const char *ours[] = {"pluto_main", "mqtt_manager", "wifi_manager", "web_server",
-                          "web_api", "config_store", "sntp_manager", "dns_hijack"};
+                          "web_api", "config_store", "sntp_manager", "dns_hijack", "servo"};
     const char *theirs[] = {"wifi", "esp_netif_handlers", "mqtt_client", "httpd_uri", "", "pluto"};
 
     for (size_t i = 0; i < sizeof(ours) / sizeof(ours[0]); i++) {

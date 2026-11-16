@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -14,6 +15,7 @@
 #include "log_ring.h"
 #include "mqtt_manager.h"
 #include "rotor.h"
+#include "servo_driver.h"
 #include "sntp_manager.h"
 #include "web_server.h"
 #include "wifi_manager.h"
@@ -168,31 +170,52 @@ static void rotor_task(void *arg)
 {
     TickType_t last_state = xTaskGetTickCount();
     rotor_mode_t last_mode = ROTOR_MODE_IDLE;
+    bool last_resting = true;
+    /* The servos move in monotonic time: SNTP steps the wall clock, and a
+     * jump there must not become a jump of the antenna. */
+    int64_t last_tick_us = esp_timer_get_time();
 
     (void)arg;
 
     for (;;) {
         pan_tilt_pose_t pose;
+        bool has_pose;
         rotor_mode_t mode;
-        bool moved;
+        bool resting;
         bool mode_unreported;
         TickType_t period;
+        int32_t dt_ms = (int32_t)((esp_timer_get_time() - last_tick_us) / 1000);
+
+        /* Advanced by whole milliseconds so the remainder carries over to the
+         * next tick instead of making the profile run slow. */
+        last_tick_us += (int64_t)dt_ms * 1000;
 
         xSemaphoreTake(s_rotor_lock, portMAX_DELAY);
-        moved = rotor_tick(&s_rotor, now_ms());
+        rotor_tick(&s_rotor, now_ms(), dt_ms);
+        has_pose = s_rotor.has_pose;
         pose = s_rotor.pose;
         mode = s_rotor.mode;
+        resting = rotor_outputs_resting(&s_rotor);
         mode_unreported = mode != s_reported_mode;
         xSemaphoreGive(s_rotor_lock);
 
-        if (moved) {
-            /* The servo driver (issue #4) takes the angles from here. */
-            ESP_LOGD(TAG, "pan=%ld tilt=%ld (%s)", (long)pose.pan_cdeg, (long)pose.tilt_cdeg,
-                     pose.mode == PAN_TILT_FLIPPED ? "flipped" : "normal");
+        /* Outside the lock, every tick: the driver skips a duty it already has
+         * and resumes released outputs on the next set. Its only error is "not
+         * started", which start_rotor() has already logged. */
+        if (resting) {
+            servo_driver_release();
+        } else if (has_pose) {
+            servo_driver_set(pose.pan_cdeg, pose.tilt_cdeg);
         }
+
         if (mode != last_mode) {
             ESP_LOGI(TAG, "Rotor mode: %s", rotor_mode_name(mode));
             last_mode = mode;
+        }
+        if (resting != last_resting) {
+            /* Logged even with the driver down, to follow HU-35 without servos. */
+            ESP_LOGI(TAG, "Servo outputs %s", resting ? "at rest" : "active");
+            last_resting = resting;
         }
 
         period = pdMS_TO_TICKS(mode == ROTOR_MODE_TRACKING ? STATE_PERIOD_TRACKING_MS : STATE_PERIOD_IDLE_MS);
@@ -207,11 +230,52 @@ static void rotor_task(void *arg)
 
 static void start_rotor(void)
 {
-    /* Mount facing north with both servos on their full range until the
-     * calibration (az_ref and limits) is stored in config_store. */
-    const pan_tilt_config_t mount = PAN_TILT_CONFIG_DEFAULT;
+    pluto_calibration_t cal;
+    pan_tilt_config_t mount;
+    servo_driver_config_t servos;
+    /* Kconfig is in degrees for whoever tunes it, the profile in centidegrees. */
+    const motion_profile_config_t motion = {
+        .v_max_cdeg_s = CONFIG_PLUTO_MOTION_MAX_SPEED_DEG_S * 100,
+        .a_max_cdeg_s2 = CONFIG_PLUTO_MOTION_MAX_ACCEL_DEG_S2 * 100,
+        .rest_after_ms = CONFIG_PLUTO_MOTION_REST_AFTER_MS,
+    };
 
-    rotor_init(&s_rotor, &mount, CONFIG_PLUTO_EXPIRED_POINT_TOLERANCE_MS);
+    /* Cannot fail once config_store_init() has succeeded. */
+    ESP_ERROR_CHECK(config_store_get_calibration(&cal));
+
+    mount = (pan_tilt_config_t){
+        .az_ref_cdeg = cal.az_ref_cdeg,
+        .pan_min_cdeg = cal.pan_min_cdeg,
+        .pan_max_cdeg = cal.pan_max_cdeg,
+        .tilt_min_cdeg = cal.tilt_min_cdeg,
+        .tilt_max_cdeg = cal.tilt_max_cdeg,
+    };
+    /* The pins follow the wiring, so they stay in Kconfig; the pulses are part
+     * of the stored calibration. */
+    servos = (servo_driver_config_t){
+        .pan = {.gpio_num = CONFIG_PLUTO_SERVO_PAN_GPIO, .calibration = {cal.pan_us_at_0, cal.pan_us_at_180}},
+        .tilt = {.gpio_num = CONFIG_PLUTO_SERVO_TILT_GPIO, .calibration = {cal.tilt_us_at_0, cal.tilt_us_at_180}},
+    };
+
+    ESP_LOGI(TAG, "Mount: az_ref=%ld pan=%ld..%ld tilt=%ld..%ld cdeg",
+             (long)mount.az_ref_cdeg,
+             (long)mount.pan_min_cdeg,
+             (long)mount.pan_max_cdeg,
+             (long)mount.tilt_min_cdeg,
+             (long)mount.tilt_max_cdeg);
+
+    /* Any fallback for a bad stored calibration is a guess that could drive
+     * the mount past limits someone set, so the servos stay still instead.
+     * Not worth a reboot loop either: the board keeps reporting, with the
+     * dashboard and /logs reachable to say why. */
+    if (!pan_tilt_config_valid(&mount)) {
+        ESP_LOGE(TAG, "Stored mount calibration is invalid; servos not started");
+        mount = PAN_TILT_CONFIG_DEFAULT; /* only so the rotor keeps reporting */
+    } else if (servo_driver_init(&servos) != ESP_OK) { /* refuses bad pulses or pins */
+        ESP_LOGE(TAG, "Servos not started; tracking without moving the mount");
+    }
+
+    rotor_init(&s_rotor, &mount, CONFIG_PLUTO_EXPIRED_POINT_TOLERANCE_MS, &motion);
     s_rotor_lock = xSemaphoreCreateMutex();
     configASSERT(s_rotor_lock != NULL);
     xTaskCreate(rotor_task, "rotor", 4096, NULL, 5, NULL);

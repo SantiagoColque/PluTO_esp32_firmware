@@ -29,9 +29,33 @@
 #define KEY_ADMIN_PASS "admin_pass"
 #define KEY_HOME_CHANNEL "home_ch"
 
+/*
+ * The mount's calibration gets a namespace of its own because
+ * config_store_factory_reset() erases CONFIG_STORE_NAMESPACE whole to bring the
+ * setup portal back, and moving to another WiFi network says nothing about
+ * where the antenna points.
+ *
+ * It is still lost when init_nvs() in main.c erases the entire NVS partition,
+ * which it does on ESP_ERR_NVS_NO_FREE_PAGES or ESP_ERR_NVS_NEW_VERSION_FOUND.
+ * The next boot then seeds it from menuconfig again, like the rest.
+ */
+#define CALIBRATION_NAMESPACE "pluto_cal"
+
+#define KEY_CAL_AZ_REF "az_ref"
+#define KEY_CAL_PAN_MIN "pan_min"
+#define KEY_CAL_PAN_MAX "pan_max"
+#define KEY_CAL_TILT_MIN "tilt_min"
+#define KEY_CAL_TILT_MAX "tilt_max"
+#define KEY_CAL_PAN_US_AT_0 "pan_us0"
+#define KEY_CAL_PAN_US_AT_180 "pan_us180"
+#define KEY_CAL_TILT_US_AT_0 "tilt_us0"
+#define KEY_CAL_TILT_US_AT_180 "tilt_us180"
+
 static const char *TAG = "config_store";
 
 static pluto_config_t s_cache;
+/* Written only by config_store_init(), so readers need no lock. */
+static pluto_calibration_t s_calibration;
 static SemaphoreHandle_t s_mutex;
 static bool s_initialized;
 
@@ -92,6 +116,95 @@ static esp_err_t write_all(nvs_handle_t handle, const pluto_config_t *cfg)
     ESP_RETURN_ON_ERROR(nvs_set_u8(handle, KEY_VERSION, CONFIG_STORE_VERSION), TAG, "cfg_ver");
 
     return nvs_commit(handle);
+}
+
+static void apply_calibration_seed(pluto_calibration_t *cal)
+{
+    cal->az_ref_cdeg = CONFIG_PLUTO_CAL_AZ_REF_CDEG;
+    cal->pan_min_cdeg = CONFIG_PLUTO_CAL_PAN_MIN_CDEG;
+    cal->pan_max_cdeg = CONFIG_PLUTO_CAL_PAN_MAX_CDEG;
+    cal->tilt_min_cdeg = CONFIG_PLUTO_CAL_TILT_MIN_CDEG;
+    cal->tilt_max_cdeg = CONFIG_PLUTO_CAL_TILT_MAX_CDEG;
+    /* The pulses' seed lives in the servo component's menu, next to the
+     * DS3218 version that sets their defaults, rather than in main's. */
+    cal->pan_us_at_0 = CONFIG_PLUTO_SERVO_PAN_US_AT_0;
+    cal->pan_us_at_180 = CONFIG_PLUTO_SERVO_PAN_US_AT_180;
+    cal->tilt_us_at_0 = CONFIG_PLUTO_SERVO_TILT_US_AT_0;
+    cal->tilt_us_at_180 = CONFIG_PLUTO_SERVO_TILT_US_AT_180;
+}
+
+/* One key per field, like pluto_cfg, so a field added later loads on a device
+ * that never stored it (it keeps its seed), without a migration. */
+static esp_err_t write_calibration(nvs_handle_t handle, const pluto_calibration_t *cal)
+{
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_AZ_REF, cal->az_ref_cdeg), TAG, "az_ref");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_MIN, cal->pan_min_cdeg), TAG, "pan_min");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_MAX, cal->pan_max_cdeg), TAG, "pan_max");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_MIN, cal->tilt_min_cdeg), TAG, "tilt_min");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_MAX, cal->tilt_max_cdeg), TAG, "tilt_max");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_US_AT_0, cal->pan_us_at_0), TAG, "pan_us0");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_PAN_US_AT_180, cal->pan_us_at_180), TAG, "pan_us180");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_US_AT_0, cal->tilt_us_at_0), TAG, "tilt_us0");
+    ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_TILT_US_AT_180, cal->tilt_us_at_180), TAG, "tilt_us180");
+
+    return nvs_commit(handle);
+}
+
+static void load_i32(nvs_handle_t handle, const char *key, int32_t *dest)
+{
+    int32_t value;
+
+    /* An absent key keeps the seed the caller already placed in dest. */
+    if (nvs_get_i32(handle, key, &value) == ESP_OK) {
+        *dest = value;
+    }
+}
+
+/*
+ * Fills cal from NVS, or seeds NVS when it holds no calibration yet. On any
+ * error cal is left holding the menuconfig seed, so the caller always has a
+ * value to hand on; it is range-checked again before the rotor uses it.
+ */
+static esp_err_t load_calibration(pluto_calibration_t *cal)
+{
+    nvs_handle_t handle;
+    int32_t probe;
+    bool seed_needed;
+    esp_err_t err = ESP_OK;
+
+    apply_calibration_seed(cal);
+
+    ESP_RETURN_ON_ERROR(nvs_open(CALIBRATION_NAMESPACE, NVS_READWRITE, &handle),
+                        TAG,
+                        "Unable to open the calibration namespace");
+
+    seed_needed = nvs_get_i32(handle, KEY_CAL_AZ_REF, &probe) == ESP_ERR_NVS_NOT_FOUND;
+
+#if CONFIG_PLUTO_FORCE_KCONFIG_SEED
+    if (!seed_needed) {
+        ESP_LOGW(TAG, "PLUTO_FORCE_KCONFIG_SEED is on: overwriting the stored calibration");
+    }
+    seed_needed = true;
+#endif
+
+    if (seed_needed) {
+        ESP_LOGI(TAG, "Seeding the mount calibration from menuconfig");
+        err = write_calibration(handle, cal);
+    } else {
+        load_i32(handle, KEY_CAL_AZ_REF, &cal->az_ref_cdeg);
+        load_i32(handle, KEY_CAL_PAN_MIN, &cal->pan_min_cdeg);
+        load_i32(handle, KEY_CAL_PAN_MAX, &cal->pan_max_cdeg);
+        load_i32(handle, KEY_CAL_TILT_MIN, &cal->tilt_min_cdeg);
+        load_i32(handle, KEY_CAL_TILT_MAX, &cal->tilt_max_cdeg);
+        load_i32(handle, KEY_CAL_PAN_US_AT_0, &cal->pan_us_at_0);
+        load_i32(handle, KEY_CAL_PAN_US_AT_180, &cal->pan_us_at_180);
+        load_i32(handle, KEY_CAL_TILT_US_AT_0, &cal->tilt_us_at_0);
+        load_i32(handle, KEY_CAL_TILT_US_AT_180, &cal->tilt_us_at_180);
+    }
+
+    nvs_close(handle);
+
+    return err;
 }
 
 esp_err_t config_store_init(void)
@@ -163,6 +276,15 @@ esp_err_t config_store_init(void)
     nvs_close(handle);
 
     memcpy(&s_cache, &cfg, sizeof(s_cache));
+
+    /* Not fatal: the network configuration above is what keeps the dashboard
+     * reachable to fix things, and a reboot loop over the mount would lose it. */
+    err = load_calibration(&s_calibration);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Mount calibration not loaded from NVS (%s); using the menuconfig seed",
+                 esp_err_to_name(err));
+    }
+
     s_initialized = true;
 
     ESP_LOGI(TAG,
@@ -313,6 +435,20 @@ esp_err_t config_store_set_home_channel(uint8_t channel)
 bool config_store_is_provisioned(void)
 {
     return s_initialized && s_cache.provisioned;
+}
+
+esp_err_t config_store_get_calibration(pluto_calibration_t *out)
+{
+    if (out == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    *out = s_calibration;
+    return ESP_OK;
 }
 
 esp_err_t config_store_factory_reset(void)

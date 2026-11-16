@@ -3,14 +3,14 @@
 CC ?= cc
 CFLAGS ?= -std=gnu17 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-sanitize-recover=all
 COMPONENTS = ../..
-INCLUDES = -I../include -I$(COMPONENTS)/coord_dto/include -I$(COMPONENTS)/trajectory/include -I$(COMPONENTS)/pan_tilt/include
-SOURCES = ../rotor.c $(COMPONENTS)/coord_dto/coord_dto.c $(COMPONENTS)/trajectory/trajectory.c $(COMPONENTS)/pan_tilt/pan_tilt.c
+INCLUDES = -I../include -I$(COMPONENTS)/coord_dto/include -I$(COMPONENTS)/trajectory/include -I$(COMPONENTS)/pan_tilt/include -I$(COMPONENTS)/motion_profile/include
+SOURCES = ../rotor.c $(COMPONENTS)/coord_dto/coord_dto.c $(COMPONENTS)/trajectory/trajectory.c $(COMPONENTS)/pan_tilt/pan_tilt.c $(COMPONENTS)/motion_profile/motion_profile.c
 
 test: test_rotor
 	./test_rotor
 
 test_rotor: test_rotor.c $(SOURCES) ../include/rotor.h
-	$(CC) $(CFLAGS) $(INCLUDES) test_rotor.c $(SOURCES) -o $@
+	$(CC) $(CFLAGS) $(INCLUDES) test_rotor.c $(SOURCES) -lm -o $@
 
 clean:
 	rm -f test_rotor

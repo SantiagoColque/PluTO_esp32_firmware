@@ -1,0 +1,33 @@
+menu "PluTO motion profile"
+
+    comment "Starting points: tune them on the bench with the antenna mounted."
+    comment "Compile-time constants, unlike the NVS seeds: change, rebuild, flash."
+
+    config PLUTO_MOTION_MAX_SPEED_DEG_S
+        int "Top speed of each servo axis (degrees per second)"
+        default 60
+        range 1 600
+        help
+            Top speed per axis (HU-36). Below about 20 the pan falls behind
+            near the zenith (test_a_high_pass_keeps_up in the rotor tests).
+
+    config PLUTO_MOTION_MAX_ACCEL_DEG_S2
+        int "Top acceleration of each servo axis (degrees per second squared)"
+        default 120
+        range 1 5000
+        help
+            Top acceleration and deceleration per axis, the braking after a
+            HOLD included (HU-36): it spares the gears the jerk of a jump. Too
+            low and high passes fall behind as well.
+
+    config PLUTO_MOTION_REST_AFTER_MS
+        int "Time still before the servo outputs can be released (ms)"
+        default 5000
+        range 0 3600000
+        help
+            Once both axes have been still at the same target this long, both
+            servo outputs are released until the next target (HU-35). 0 never
+            releases them. If the tilt sags under the antenna without pulses
+            (still to be measured), lengthen it or set 0.
+
+endmenu

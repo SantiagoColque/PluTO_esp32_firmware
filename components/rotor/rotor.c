@@ -4,13 +4,18 @@
 #include <stdio.h>
 #include <string.h>
 
-void rotor_init(rotor_t *rotor, const pan_tilt_config_t *mount, int64_t tolerance_ms)
+void rotor_init(rotor_t *rotor,
+                const pan_tilt_config_t *mount,
+                int64_t tolerance_ms,
+                const motion_profile_config_t *motion)
 {
     memset(rotor, 0, sizeof(*rotor));
     rotor->mount = *mount;
     rotor->tolerance_ms = tolerance_ms;
     rotor->mode = ROTOR_MODE_IDLE;
     trajectory_init(&rotor->trajectory);
+    motion_profile_init(&rotor->pan_axis, motion);
+    motion_profile_init(&rotor->tilt_axis, motion);
 }
 
 /* Returns the reject code, or NULL when the batch was loaded. */
@@ -76,39 +81,92 @@ bool rotor_handle_payload(rotor_t *rotor,
     }
 
     rotor->received_any = true;
-    rotor_tick(rotor, now_ms);
+    rotor_tick(rotor, now_ms, 0);
     return true;
 }
 
-bool rotor_tick(rotor_t *rotor, int64_t now_ms)
+static int32_t clamp(int32_t value, int32_t min, int32_t max)
 {
-    int32_t az_cdeg;
-    int32_t el_cdeg;
-    pan_tilt_pose_t pose;
-    bool changed = false;
+    return value < min ? min : value > max ? max : value;
+}
 
-    if (!trajectory_target(&rotor->trajectory, now_ms, &az_cdeg, &el_cdeg)) {
-        rotor->mode = rotor->received_any ? ROTOR_MODE_HOLDING : ROTOR_MODE_IDLE;
+/* Copies the profiled angles into the commanded pose. Returns true if they changed. */
+static bool update_pose(rotor_t *rotor)
+{
+    pan_tilt_pose_t pose;
+    bool changed;
+
+    if (!motion_profile_has_position(&rotor->pan_axis) || !motion_profile_has_position(&rotor->tilt_axis)) {
         return false;
     }
 
-    /* An unreachable intermediate target keeps the last angles: never move
-     * toward something the mount cannot point at. */
-    if (pan_tilt_from_azel(&rotor->mount,
-                           rotor->has_pose ? rotor->pose.mode : PAN_TILT_NORMAL,
-                           az_cdeg,
-                           el_cdeg,
-                           &pose)) {
-        changed = !rotor->has_pose || pose.pan_cdeg != rotor->pose.pan_cdeg ||
-                  pose.tilt_cdeg != rotor->pose.tilt_cdeg || pose.mode != rotor->pose.mode;
-        rotor->pose = pose;
-        rotor->has_pose = true;
+    /* A late tick can carry an axis a little past its target; never past the mount. */
+    pose.pan_cdeg = clamp(motion_profile_position(&rotor->pan_axis), rotor->mount.pan_min_cdeg,
+                          rotor->mount.pan_max_cdeg);
+    pose.tilt_cdeg = clamp(motion_profile_position(&rotor->tilt_axis), rotor->mount.tilt_min_cdeg,
+                           rotor->mount.tilt_max_cdeg);
+    /* Halfway through a flip the tilt can still be on the old side of the
+     * zenith: the pose takes the mode it is physically in, with the target's
+     * as the tie-break on the zenith itself. */
+    pose.mode = rotor->target.mode;
+    pose.mode = pan_tilt_pose_mode(&pose);
+
+    changed = !rotor->has_pose || pose.pan_cdeg != rotor->pose.pan_cdeg ||
+              pose.tilt_cdeg != rotor->pose.tilt_cdeg || pose.mode != rotor->pose.mode;
+    rotor->pose = pose;
+    rotor->has_pose = true;
+    return changed;
+}
+
+bool rotor_tick(rotor_t *rotor, int64_t now_ms, int32_t dt_ms)
+{
+    int32_t az_cdeg;
+    int32_t el_cdeg;
+    pan_tilt_pose_t target;
+    bool following = trajectory_target(&rotor->trajectory, now_ms, &az_cdeg, &el_cdeg);
+    bool changed;
+
+    /* An unreachable intermediate target keeps the last one: never move
+     * toward something the mount cannot point at. The hysteresis goes by the
+     * target's mode, not by the servos': halfway through a flip they are
+     * between modes, and going by them could turn the flip back. */
+    if (following && pan_tilt_from_azel(&rotor->mount,
+                                        rotor->has_target ? rotor->target.mode : PAN_TILT_NORMAL,
+                                        az_cdeg,
+                                        el_cdeg,
+                                        &target)) {
+        rotor->target = target;
+        rotor->has_target = true;
     }
 
-    rotor->mode = now_ms < rotor->trajectory.points[rotor->trajectory.count - 1].t_ms
-                      ? ROTOR_MODE_TRACKING
-                      : ROTOR_MODE_HOLDING;
+    if (following && rotor->has_target) {
+        motion_profile_step(&rotor->pan_axis, rotor->target.pan_cdeg, dt_ms);
+        motion_profile_step(&rotor->tilt_axis, rotor->target.tilt_cdeg, dt_ms);
+    } else {
+        /* After a HOLD, or before any target: whatever is moving slows down
+         * at the acceleration limit instead of stopping dead (§6.6). */
+        motion_profile_brake(&rotor->pan_axis, dt_ms);
+        motion_profile_brake(&rotor->tilt_axis, dt_ms);
+    }
+    changed = update_pose(rotor);
+
+    if (!following) {
+        rotor->mode = rotor->received_any ? ROTOR_MODE_HOLDING : ROTOR_MODE_IDLE;
+    } else if (now_ms < rotor->trajectory.points[rotor->trajectory.count - 1].t_ms ||
+               !motion_profile_settled(&rotor->pan_axis) || !motion_profile_settled(&rotor->tilt_axis)) {
+        /* Past the last point but still on the way to it is not holding yet:
+         * device-state.md describes holding as standing still. */
+        rotor->mode = ROTOR_MODE_TRACKING;
+    } else {
+        rotor->mode = ROTOR_MODE_HOLDING;
+    }
     return changed;
+}
+
+bool rotor_outputs_resting(const rotor_t *rotor)
+{
+    return !rotor->has_pose ||
+           (motion_profile_resting(&rotor->pan_axis) && motion_profile_resting(&rotor->tilt_axis));
 }
 
 const char *rotor_mode_name(rotor_mode_t mode)

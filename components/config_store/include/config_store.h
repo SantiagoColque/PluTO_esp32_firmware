@@ -29,6 +29,30 @@ typedef struct {
     bool provisioned;
 } pluto_config_t;
 
+/*
+ * The mount's calibration. The geographic heading the pan faces at 0 and the
+ * usable range of each joint, in centidegrees, mean what the fields of the
+ * same name in pan_tilt.h do. The pulses, in microseconds, are each servo's
+ * two-point calibration: the pulse that puts it at 0 degrees and the one that
+ * puts it at 180, as in servo_calibration_t (servo_pulse.h). Plain integers
+ * rather than those types so this component depends on neither the kinematics
+ * nor the servo driver; main converts them.
+ *
+ * Stored apart from pluto_config_t, in a namespace of its own, so that
+ * re-provisioning the WiFi with config_store_factory_reset() does not lose it.
+ */
+typedef struct {
+    int32_t az_ref_cdeg;
+    int32_t pan_min_cdeg;
+    int32_t pan_max_cdeg;
+    int32_t tilt_min_cdeg;
+    int32_t tilt_max_cdeg;
+    int32_t pan_us_at_0;
+    int32_t pan_us_at_180;
+    int32_t tilt_us_at_0;
+    int32_t tilt_us_at_180;
+} pluto_calibration_t;
+
 esp_err_t config_store_init(void);
 esp_err_t config_store_get(pluto_config_t *out);
 esp_err_t config_store_set(const pluto_config_t *in);
@@ -36,7 +60,24 @@ esp_err_t config_store_validate(const pluto_config_t *in, char *err, size_t err_
 esp_err_t config_store_set_admin_password(const char *password);
 esp_err_t config_store_set_home_channel(uint8_t channel);
 bool config_store_is_provisioned(void);
+
+/**
+ * @brief Erase the network and dashboard configuration (pluto_config_t).
+ *
+ * The mount's calibration lives in another namespace and is kept.
+ */
 esp_err_t config_store_factory_reset(void);
+
+/**
+ * @brief Copy the mount's calibration.
+ *
+ * config_store_init() loads it: from NVS when it holds one, otherwise from the
+ * menuconfig seed (PLUTO_CAL_* for the mount, PLUTO_SERVO_*_US_AT_* for the
+ * pulses), which is then written to NVS. It is not range-checked here: check
+ * the mount with pan_tilt_config_valid(), and servo_driver_init() checks the
+ * pulses.
+ */
+esp_err_t config_store_get_calibration(pluto_calibration_t *out);
 
 /**
  * @brief Borrow the RAM cache instead of copying it.
