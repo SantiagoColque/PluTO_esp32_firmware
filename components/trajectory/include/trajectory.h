@@ -6,20 +6,9 @@
 #include <stdint.h>
 
 /*
- * What the board does between messages, as defined in PluTO's
- * docs/contracts/coordinates-dto.md §6.3, §6.6 and §6.7:
- *
- * - a new batch replaces the pending points from its first instant on, and
- *   the earlier ones stay, as the server's merge_trajectory does;
- * - before the first point the target is the first point;
- * - between two points the target is interpolated linearly in time, with the
- *   azimuth taking the shortest way around;
- * - after the last point the target stays there;
- * - a HOLD drops everything that is pending.
- *
- * Time is always an argument, never read here, so the logic runs as a host
- * test (test_host/). Points use absolute instants and plain integers so this
- * does not depend on the wire format.
+ * Target between messages (coordinates-dto.md §6): linear in time between
+ * points with the azimuth the short way round, held at both ends. Time is
+ * always an argument, so it runs as a host test.
  */
 
 #define TRAJECTORY_MAX_POINTS 16
@@ -32,25 +21,18 @@ typedef struct {
 
 typedef struct {
     trajectory_point_t points[TRAJECTORY_MAX_POINTS];
-    size_t count; /* 0: nothing to follow, stay where you are */
+    size_t count; /* 0: nothing to follow, stay put */
 } trajectory_t;
 
 void trajectory_init(trajectory_t *traj);
 
 /**
- * @brief Load a new batch (§6.7).
+ * @brief Load a new batch.
  *
- * It replaces the pending points from its first instant on; the earlier ones
- * stay, so the target keeps following them until the batch starts. Without
- * room for all, the oldest pending points go, never the batch's.
- *
- * Points more than tolerance_ms in the past are dropped (§6.3). Returns how
- * many of the batch's points were kept. 0 means the batch is discarded and
- * the current trajectory is left untouched. That happens when every point had
- * expired, when there are more than TRAJECTORY_MAX_POINTS, or when the points
- * are not in strictly increasing time order. The decoder already guarantees
- * the order (§6.5); checking it again here keeps the interpolation from ever
- * dividing by zero.
+ * Replaces pending points from the batch's first instant on, like the server's
+ * merge_trajectory; when full, the oldest pending go first. Drops points older
+ * than tolerance_ms. Returns how many were kept; 0 (all expired, too many, out
+ * of order) leaves traj untouched. Order is rechecked so it never divides by 0.
  */
 size_t trajectory_load(trajectory_t *traj,
                        const trajectory_point_t *points,
@@ -58,14 +40,13 @@ size_t trajectory_load(trajectory_t *traj,
                        int64_t now_ms,
                        int64_t tolerance_ms);
 
-/** @brief HOLD: drop every pending point (§6.6). */
+/** @brief HOLD: drop every pending point. */
 void trajectory_clear(trajectory_t *traj);
 
 /**
  * @brief Where the antenna should point at now_ms.
  *
- * Returns false when there is nothing to follow (after init or a HOLD), which
- * means staying where it is.
+ * False when there is nothing to follow: stay where you are.
  */
 bool trajectory_target(const trajectory_t *traj, int64_t now_ms, int32_t *az_cdeg, int32_t *el_cdeg);
 

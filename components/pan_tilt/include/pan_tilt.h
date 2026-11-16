@@ -5,21 +5,15 @@
 #include <stdint.h>
 
 /*
- * Geographic azimuth/elevation to the angles of a pan-tilt made of two
- * 180-degree servos, as defined in PluTO's docs/contracts/coordinates-dto.md §9.
+ * Geographic az/el to a two-servo 180-degree pan-tilt (coordinates-dto.md §9),
+ * in centidegrees.
  *
  *   mode      pan                 tilt
  *   normal    az - az_ref         el
  *   flipped   az - az_ref - 180   180 - el
  *
- * Tilt runs from 0 (horizon ahead) through 90 (zenith) to 180 (horizon
- * behind), so the flipped mode points past the zenith. Between them the two
- * modes cover the whole sky above the horizon. All angles are in centidegrees
- * (0.01 degrees), the unit of the wire format.
- *
- * This is kinematics only: servo trims and the angle-to-PWM conversion belong
- * to the servo driver. No ESP-IDF dependencies, so it runs as a host test
- * (test_host/).
+ * Tilt runs 0 (horizon ahead), 90 (zenith), 180 (horizon behind), so the two
+ * modes together cover the whole sky.
  */
 
 typedef enum {
@@ -28,10 +22,10 @@ typedef enum {
 } pan_tilt_mode_t;
 
 typedef struct {
-    int32_t az_ref_cdeg;   /* geographic azimuth the pan faces at 0: the mount's heading */
-    int32_t pan_min_cdeg;  /* usable pan range; 0..18000 for a full 180-degree servo */
+    int32_t az_ref_cdeg;   /* heading the pan faces at 0 */
+    int32_t pan_min_cdeg;  /* usable range, within 0..18000 */
     int32_t pan_max_cdeg;
-    int32_t tilt_min_cdeg; /* usable tilt range; 0..18000 for a full 180-degree servo */
+    int32_t tilt_min_cdeg; /* usable range, within 0..18000 */
     int32_t tilt_max_cdeg;
 } pan_tilt_config_t;
 
@@ -48,22 +42,16 @@ typedef struct {
 /**
  * @brief Whether a config describes a mount this mapping can drive.
  *
- * az_ref must be a heading in 0..35999, and each axis a non-empty range
- * (min < max) within 0..18000. The mount's calibration lives in NVS, outside
- * the firmware image, so it is checked with this before the rotor gets it: a
- * range past 0..18000 would command angles a 180-degree servo cannot reach, and
- * an empty one would turn every batch `unreachable`.
+ * Heading in 0..35999, each axis min < max within 0..18000. The calibration
+ * comes from NVS, so check it before the rotor gets it.
  */
 bool pan_tilt_config_valid(const pan_tilt_config_t *cfg);
 
 /**
  * @brief Servo angles that point at a geographic az/el.
  *
- * Keeps the current mode while it reaches the target and switches only when it
- * cannot, so a target near the border between modes does not flip the pan back
- * and forth. Returns false when neither mode reaches it, for instance below the
- * horizon or outside a narrowed servo range. In that case the servos must not
- * move.
+ * Keeps the current mode while it reaches the target, so the pan does not flip
+ * back and forth near the border. False if no mode reaches it: don't move.
  */
 bool pan_tilt_from_azel(const pan_tilt_config_t *cfg,
                         pan_tilt_mode_t current,
@@ -74,29 +62,23 @@ bool pan_tilt_from_azel(const pan_tilt_config_t *cfg,
 /**
  * @brief Whether some mode reaches a geographic az/el.
  *
- * A batch with an unreachable point is rejected whole with `unreachable`
- * (coordinates-dto.md §9, device-state.md §5).
+ * A batch with an unreachable point is rejected whole.
  */
 bool pan_tilt_reachable(const pan_tilt_config_t *cfg, int32_t az_cdeg, int32_t el_cdeg);
 
 /**
- * @brief The mode a pose is physically in, from the side of the zenith its
- * tilt is on.
+ * @brief The mode a pose is physically in.
  *
- * A pose on its way between modes, which is what a speed-limited flip goes
- * through, carries the label of the mode it is heading to while its tilt can
- * still be on the other side. On the zenith itself both modes point at the
- * same place and the label decides.
+ * From the side of the zenith the tilt is on; mid-flip it can differ from the
+ * label. On the zenith itself the label decides.
  */
 pan_tilt_mode_t pan_tilt_pose_mode(const pan_tilt_pose_t *pose);
 
 /**
  * @brief The geographic az/el a pose points at.
  *
- * The inverse of pan_tilt_from_azel(), used to report the position on the
- * state channel (device-state.md §4). It goes by pan_tilt_pose_mode() rather
- * than by the label, so a pose halfway through a flip still reports where it
- * points and an elevation within ±90 degrees.
+ * Inverse of pan_tilt_from_azel(), by pan_tilt_pose_mode(), so a pose mid-flip
+ * still reports where it points with el within ±90.
  */
 void pan_tilt_to_azel(const pan_tilt_config_t *cfg,
                       const pan_tilt_pose_t *pose,

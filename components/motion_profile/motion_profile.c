@@ -3,11 +3,7 @@
 #include <math.h>
 #include <string.h>
 
-/*
- * A step that ends this close to the target ends on it. Float addition can
- * land a few ulps off (about 0.002 centidegrees at 180 degrees), and without
- * this the axis would never count as settled.
- */
+/* Float steps land a few ulps off the target; without this the axis never settles. */
 #define LANDING_SLACK_CDEG 0.05f
 
 static int32_t clamp_dt(int32_t dt_ms)
@@ -18,26 +14,15 @@ static int32_t clamp_dt(int32_t dt_ms)
     return dt_ms > MOTION_PROFILE_MAX_DT_MS ? MOTION_PROFILE_MAX_DT_MS : dt_ms;
 }
 
-/*
- * The fastest speed for this step from which the axis can still stop within
- * dist_cdeg, losing dv_cdeg_s of speed every later step of dt_s.
- *
- * Worked out step by step rather than with the continuous sqrt(2 a d): the
- * axis moves in whole steps, and the continuous curve underestimates the
- * stopping distance enough to overshoot.
- *
- * At speed v this step and then v - dv, v - 2 dv, ... the axis covers
- * dt * ((n + 1) v - n (n + 1) dv / 2), with n = floor(v / dv). In units of
- * dv * dt that is linear in v for each n, so the speed that covers exactly
- * dist comes out in closed form once n is known.
- */
+/* Fastest speed this step that still stops within dist_cdeg, losing dv per step.
+ * Summed over whole steps, not sqrt(2 a d): the continuous curve underestimates
+ * the stopping distance and overshoots. n is the number of later braking steps. */
 static float braking_speed(float dist_cdeg, float dv_cdeg_s, float dt_s)
 {
     float steps = dist_cdeg / (dv_cdeg_s * dt_s);
     float n = floorf((sqrtf(8.0f * steps + 1.0f) - 1.0f) / 2.0f);
 
-    /* The square root can round across a boundary; the curve is continuous
-     * there, so nudging n back is all it takes. */
+    /* sqrtf can round n across a boundary; nudging it back is enough. */
     if ((n + 1.0f) * (n + 2.0f) / 2.0f <= steps) {
         n += 1.0f;
     } else if (n > 0.0f && n * (n + 1.0f) / 2.0f > steps) {
@@ -51,16 +36,14 @@ static void advance(motion_profile_t *axis, float target_cdeg, float dt_s)
     float error = target_cdeg - axis->pos_cdeg;
     float dv = (float)axis->cfg.a_max_cdeg_s2 * dt_s;
     float speed = fminf(braking_speed(fabsf(error), dv, dt_s), (float)axis->cfg.v_max_cdeg_s);
-    /* The braking curve wants to slow down faster than allowed only when the
-     * target moved back toward the axis, or after a longer tick. Then it goes
-     * a little past and comes back. */
+    /* Braking harder than allowed only happens when the target moved back or
+     * after a long tick; the axis then overshoots a little and returns. */
     float vel = fminf(fmaxf(copysignf(speed, error), axis->vel_cdeg_s - dv), axis->vel_cdeg_s + dv);
 
     axis->pos_cdeg += vel * dt_s;
     axis->vel_cdeg_s = vel;
 
-    /* Only the position is snapped: the speed it landed at is the one it
-     * really had, and it drops to zero on the next step, within the limit. */
+    /* Only the position snaps; the speed drops to zero next step, within the limit. */
     if (fabsf(target_cdeg - axis->pos_cdeg) <= LANDING_SLACK_CDEG) {
         axis->pos_cdeg = target_cdeg;
     }
@@ -73,8 +56,7 @@ static void update_rest(motion_profile_t *axis, bool woken, int32_t dt_ms)
     if (woken || !motion_profile_settled(axis)) {
         axis->still_ms = 0;
     } else if (axis->cfg.rest_after_ms > 0) {
-        /* Capped rather than summed, so a board left alone for weeks cannot
-         * overflow it. */
+        /* Capped, so weeks of idling cannot overflow it. */
         axis->still_ms = dt_ms >= left ? axis->cfg.rest_after_ms : axis->still_ms + dt_ms;
     }
 }

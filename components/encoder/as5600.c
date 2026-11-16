@@ -7,14 +7,13 @@
 #define REG_STATUS 0x0B
 #define REG_RAW_ANGLE 0x0C /* high byte; the low one follows at 0x0D */
 
-#define STATUS_MH (1 << 3) /* magnet too strong */
-#define STATUS_ML (1 << 4) /* magnet too weak */
-#define STATUS_MD (1 << 5) /* magnet detected */
+#define STATUS_MH (1 << 3)
+#define STATUS_ML (1 << 4)
+#define STATUS_MD (1 << 5)
 
 /* Slow on purpose: the wires run through the joints, next to the servos. */
 #define BUS_SPEED_HZ 100000
-/* A read takes well under a millisecond, but the timeout counts FreeRTOS
- * ticks of 10 ms: one tick could expire at once. */
+/* Counted in 10 ms FreeRTOS ticks, where a single tick could expire at once. */
 #define XFER_TIMEOUT_MS 20
 
 static const char *TAG = "encoder";
@@ -27,9 +26,8 @@ esp_err_t as5600_init(as5600_t *encoder, const char *name, int port, int sda_gpi
         .scl_io_num = scl_gpio,
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .glitch_ignore_cnt = 7,
-        /* Too weak for long wires, which need external pull-ups, but they keep
-         * a bus without a chip high: a missing encoder is a quick NACK rather
-         * than a timeout. */
+        /* Too weak for long wires, but they hold an empty bus high, so a missing
+         * encoder NACKs fast instead of timing out. */
         .flags.enable_internal_pullup = true,
     };
     const i2c_device_config_t dev_config = {
@@ -41,7 +39,7 @@ esp_err_t as5600_init(as5600_t *encoder, const char *name, int port, int sda_gpi
 
     encoder->name = name;
     encoder->dev = NULL;
-    encoder->issue = "not read yet"; /* so the first good read is logged, with its count */
+    encoder->issue = "not read yet"; /* so the first good read gets logged */
 
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_config, &bus), TAG, "%s encoder: I2C%d", name, port);
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(bus, &dev_config, &encoder->dev), TAG, "%s encoder", name);
@@ -64,8 +62,7 @@ esp_err_t as5600_read(as5600_t *encoder, uint16_t *raw)
         return ESP_ERR_INVALID_STATE; /* as5600_init() logged why */
     }
 
-    /* Two reads rather than one burst from STATUS: the datasheet treats the
-     * address pointer specially around RAW ANGLE. */
+    /* Two reads, not a burst: the datasheet treats the pointer specially at RAW ANGLE. */
     err = read_register(encoder, REG_STATUS, &status, 1);
     if (err == ESP_OK) {
         err = read_register(encoder, REG_RAW_ANGLE, angle, sizeof(angle));

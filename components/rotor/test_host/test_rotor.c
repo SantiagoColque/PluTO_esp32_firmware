@@ -25,7 +25,6 @@ typedef struct {
     int16_t el;
 } point_spec_t;
 
-/* Packs a payload the way the server's encoder does. */
 static size_t pack(uint8_t *buf, uint8_t flags, int64_t t0_ms, int64_t t_sent_ms, const point_spec_t *points, uint8_t count)
 {
     pluto_dto_header_t header = {PLUTO_DTO_MAGIC, flags, count, t0_ms, t_sent_ms};
@@ -40,8 +39,7 @@ static size_t pack(uint8_t *buf, uint8_t flags, int64_t t0_ms, int64_t t_sent_ms
 
 static const point_spec_t PASS[] = {{0, 4500, 1000}, {1000, 5000, 2000}, {2000, 5500, 3000}};
 
-/* Without a motion profile the servos are commanded the target as is, which
- * keeps the tests of the pointing rules free of ramps. */
+/* No motion profile, so the pointing tests see the target with no ramps. */
 static void new_rotor(rotor_t *rotor)
 {
     pan_tilt_config_t mount = PAN_TILT_CONFIG_DEFAULT;
@@ -57,7 +55,6 @@ static void new_limited_rotor(rotor_t *rotor, const motion_profile_config_t *lim
     rotor_init(rotor, &mount, TOLERANCE_MS, limits);
 }
 
-/* Accepts a one-point batch and checks it went in. */
 static void send_point(rotor_t *rotor, uint16_t az, int16_t el, int64_t t_ms, int64_t now_ms)
 {
     uint8_t buf[64];
@@ -139,7 +136,6 @@ static void test_the_back_of_the_sky_uses_the_flipped_mode(void)
     CHECK(rotor_handle_payload(&rotor, buf, len, T0 - 50, true));
     CHECK(rotor.pose.mode == PAN_TILT_FLIPPED && rotor.pose.pan_cdeg == 9000 && rotor.pose.tilt_cdeg == 15000);
 
-    /* The state reports it back in geographic terms. */
     rotor_state_json(&rotor, T0, true, json, sizeof(json));
     CHECK(strstr(json, "\"az_cdeg\":27000,\"el_cdeg\":3000,\"pan_mode\":\"flipped\"") != NULL);
 }
@@ -175,7 +171,7 @@ static void test_the_time_based_rejections(void)
     len = pack(buf, 0, T0, T0 - 2000, PASS, 3);
     CHECK(!rotor_handle_payload(&rotor, buf, len, T0 - 1900, false));
     CHECK(strcmp(rotor.last_batch.error, "clock_not_synced") == 0);
-    CHECK(!rotor.last_batch.latency_valid); /* no clock, no latency */
+    CHECK(!rotor.last_batch.latency_valid);
     rotor_state_json(&rotor, T0, false, json, sizeof(json));
     CHECK(strstr(json, "\"t_sent_ms\":1789763398000,\"received_ms\":1789763398100,\"latency_ms\":null") != NULL);
 
@@ -221,15 +217,13 @@ static void test_hold_stops_even_without_a_clock(void)
     CHECK(rotor_handle_payload(&rotor, buf, len, T0 + 600, false));
     CHECK(rotor.mode == ROTOR_MODE_HOLDING);
 
-    /* It stays where it was when the HOLD arrived. */
     CHECK(!rotor_tick(&rotor, T0 + 2000, TICK_MS));
     CHECK(rotor.pose.pan_cdeg == 4750 && rotor.pose.tilt_cdeg == 1500);
 }
 
 static void test_the_mount_decides_what_is_reachable(void)
 {
-    /* What start_rotor hands in from a stored calibration: a mount facing east
-     * whose tilt cannot lean past the zenith. */
+    /* Facing east, with the tilt stopping at the zenith. */
     pan_tilt_config_t mount = {.az_ref_cdeg = 9000,
                                .pan_min_cdeg = 0,
                                .pan_max_cdeg = 18000,
@@ -247,12 +241,11 @@ static void test_the_mount_decides_what_is_reachable(void)
     CHECK(rotor_handle_payload(&rotor, buf, len, T0 - 50, true));
     CHECK(rotor.pose.mode == PAN_TILT_NORMAL && rotor.pose.pan_cdeg == 4500 && rotor.pose.tilt_cdeg == 2000);
 
-    /* Behind the mount it would take the flipped mode, which the tilt limit
-     * rules out, although the default mount reaches it. */
+    /* Behind the mount needs the flipped mode, which the tilt limit rules out. */
     len = pack(buf, 0, T0, T0 - 100, north_east, 1);
     CHECK(!rotor_handle_payload(&rotor, buf, len, T0 - 50, true));
     CHECK(rotor.last_batch.error != NULL && strcmp(rotor.last_batch.error, "unreachable") == 0);
-    CHECK(rotor.pose.pan_cdeg == 4500 && rotor.pose.tilt_cdeg == 2000); /* did not move */
+    CHECK(rotor.pose.pan_cdeg == 4500 && rotor.pose.tilt_cdeg == 2000);
 }
 
 static void test_a_payload_only_moves_the_target(void)
@@ -263,11 +256,9 @@ static void test_a_payload_only_moves_the_target(void)
 
     new_limited_rotor(&rotor, &LIMITS);
     send_point(&rotor, 4500, 1000, T0, T0 - 1000);
-    /* The first pose is taken as is: there is no position to ramp from. */
     CHECK(rotor.pose.pan_cdeg == 4500 && rotor.pose.tilt_cdeg == 1000);
 
-    /* The MQTT task hands in batches between ticks; moving there as well
-     * would add steps the profile never accounted for. */
+    /* Batches arrive between ticks; moving there would add steps the profile never saw. */
     send_point(&rotor, 9000, 1000, T0, T0 - 900);
     CHECK(rotor.target.pan_cdeg == 9000);
     CHECK(rotor.pose.pan_cdeg == 4500);
@@ -277,7 +268,6 @@ static void test_a_payload_only_moves_the_target(void)
     CHECK(rotor.pose.pan_cdeg > 4500 && rotor.pose.pan_cdeg <= 4530);
     CHECK(rotor.mode == ROTOR_MODE_TRACKING);
 
-    /* The state reports what the servos were commanded, not the target. */
     snprintf(commanded, sizeof(commanded), "\"az_cdeg\":%d,", (int)rotor.pose.pan_cdeg);
     CHECK(rotor_state_json(&rotor, T0 - 850, true, json, sizeof(json)) > 0);
     CHECK(strstr(json, commanded) != NULL);
@@ -299,8 +289,6 @@ static void test_a_hold_brakes_along_a_ramp(void)
     }
     CHECK(rotor.pose.pan_cdeg > 1000 && rotor.pose.pan_cdeg < 17000);
 
-    /* Holding at once, while the axis slows down instead of stopping dead
-     * (the profile's tests check the deceleration itself). */
     send_hold(&rotor, now);
     CHECK(rotor.mode == ROTOR_MODE_HOLDING);
     for (int i = 0; i < 40; i++) {
@@ -312,16 +300,13 @@ static void test_a_hold_brakes_along_a_ramp(void)
     CHECK(moving_ticks >= 2);
     CHECK(rotor.pose.pan_cdeg < 17000);
 
-    /* A HOLD dropped the batch, so a stopped rotor stays stopped. */
     stopped_at = rotor.pose.pan_cdeg;
     CHECK(!rotor_tick(&rotor, now + 10000, TICK_MS));
     CHECK(rotor.pose.pan_cdeg == stopped_at);
     CHECK(rotor.mode == ROTOR_MODE_HOLDING);
 }
 
-/* main's tick is not steady, and one late tick while braking carries an axis
- * a little past its target. Wherever that tick falls, the commanded pose
- * stays inside the mount. */
+/* main's tick jitters, and a late tick while braking overshoots the target. */
 static void test_a_late_tick_never_leaves_the_mount(void)
 {
     const pan_tilt_config_t mount = {0, 0, 12000, 0, 18000};
@@ -384,12 +369,10 @@ static void test_the_hysteresis_follows_the_target_not_the_servos(void)
         now += TICK_MS;
         rotor_tick(&rotor, now, TICK_MS);
     }
-    /* Halfway: the tilt has not reached the zenith yet. */
     CHECK(rotor.pose.tilt_cdeg < 9000);
     CHECK(rotor.pose.mode == PAN_TILT_NORMAL);
 
-    /* North at 30 degrees is on the border, reachable in both modes. The
-     * flip under way decides, not where the servos happen to be. */
+    /* North at 30 degrees is reachable in both modes; the flip under way decides. */
     send_point(&rotor, 0, 3000, now, now);
     CHECK(rotor.target.mode == PAN_TILT_FLIPPED);
     CHECK(rotor.target.pan_cdeg == 18000 && rotor.target.tilt_cdeg == 15000);
@@ -433,7 +416,6 @@ static void test_the_outputs_rest_and_wake(void)
     int64_t now = T0;
 
     new_limited_rotor(&rotor, &LIMITS);
-    /* Nothing commanded yet, so nothing to hold. */
     CHECK(rotor_outputs_resting(&rotor));
 
     send_point(&rotor, 4500, 3000, T0, now);
@@ -448,15 +430,12 @@ static void test_the_outputs_rest_and_wake(void)
     rotor_tick(&rotor, now, TICK_MS);
     CHECK(rotor_outputs_resting(&rotor));
 
-    /* A batch somewhere else wakes them as it arrives, before the next tick. */
     send_point(&rotor, 4600, 3000, now + 1000, now);
     CHECK(!rotor_outputs_resting(&rotor));
 }
 
-/* What main relies on to release and resume the outputs: a batch that only
- * repeats where the axes rest moves nothing and keeps them at rest, while
- * after a HOLD any target, even the spot they stopped on, wakes them with the
- * commanded pose unchanged. */
+/* Repeating where the axes rest keeps them resting; after a HOLD any target,
+ * even the same spot, wakes them with the pose unchanged. */
 static void test_only_something_to_do_wakes_the_outputs(void)
 {
     rotor_t rotor;
@@ -496,12 +475,8 @@ static void test_only_something_to_do_wakes_the_outputs(void)
     CHECK(!rotor_outputs_resting(&rotor));
 }
 
-/*
- * A pass culminating at 88 degrees, from a 500 km orbit, crossing the sky
- * from north to south east of the station. The pan follows the azimuth, which
- * turns at about 25 deg/s at the top: the fastest the profile has to keep up
- * with during a pass. Flat-earth geometry is plenty for the rates.
- */
+/* 88-degree pass from a 500 km orbit, north to south: the azimuth turns about
+ * 25 deg/s at the top, the fastest of a pass. Flat-earth geometry is enough. */
 static void high_pass_point(int32_t t_s, uint16_t *az, int16_t *el)
 {
     const double height_km = 500.0;
@@ -514,7 +489,6 @@ static void high_pass_point(int32_t t_s, uint16_t *az, int16_t *el)
     *el = (int16_t)lround(el_deg * 100.0);
 }
 
-/* Angle between two directions given as az/el in centidegrees, in degrees. */
 static double pointing_error_deg(int32_t az1, int32_t el1, int32_t az2, int32_t el2)
 {
     double a1 = az1 * M_PI / 18000.0;
@@ -526,8 +500,6 @@ static double pointing_error_deg(int32_t az1, int32_t el1, int32_t az2, int32_t 
     return 2.0 * asin(sqrt(h)) * 180.0 / M_PI;
 }
 
-/* Follows the high pass and returns the worst pointing error against the
- * target, in degrees. */
 static double worst_error_on_a_high_pass(const motion_profile_config_t *limits)
 {
     rotor_t rotor;
@@ -551,7 +523,7 @@ static double worst_error_on_a_high_pass(const motion_profile_config_t *limits)
         int32_t el;
 
         rotor_tick(&rotor, now, TICK_MS);
-        CHECK(rotor.pose.mode == PAN_TILT_NORMAL); /* this pass never needs a flip */
+        CHECK(rotor.pose.mode == PAN_TILT_NORMAL);
         trajectory_target(&rotor.trajectory, now, &target_az, &target_el);
         pan_tilt_to_azel(&rotor.mount, &rotor.pose, &az, &el);
         worst = fmax(worst, pointing_error_deg(az, el, target_az, target_el));
@@ -563,12 +535,10 @@ static void test_a_high_pass_keeps_up(void)
 {
     const motion_profile_config_t too_slow = {1000, 12000, 5000};
 
-    /* The pan lags a couple of degrees at the top, but that close to the
-     * zenith an azimuth error barely moves the beam. */
+    /* The pan lags at the top, but near the zenith that barely moves the beam. */
     CHECK(worst_error_on_a_high_pass(&LIMITS) < 0.5);
 
-    /* At 10 deg/s it falls tens of degrees behind and misses by more as the
-     * pass comes down: v_max cannot go that low. */
+    /* At 10 deg/s it falls tens of degrees behind: v_max cannot go that low. */
     CHECK(worst_error_on_a_high_pass(&too_slow) > 1.0);
 }
 
@@ -583,8 +553,7 @@ static void test_the_state_reports_the_measured_position(void)
     rotor_set_measured(&rotor, true, 9050, 15000);
     rotor_tick(&rotor, T0 + TICK_MS, TICK_MS);
 
-    /* The commanded position keeps its fields; the measured one goes apart,
-     * 0.5 degrees of azimuth off, which at 30 degrees up is 0.43 on the sky. */
+    /* 0.5 degrees of azimuth off at 30 degrees up is 0.43 on the sky. */
     CHECK(rotor_state_json(&rotor, T0 + TICK_MS, true, json, sizeof(json)) > 0);
     CHECK(strstr(json, "\"az_cdeg\":27000,\"el_cdeg\":3000,\"pan_mode\":\"flipped\","
                        "\"meas\":{\"az_cdeg\":27050,\"el_cdeg\":3000},\"err_cdeg\":43,") != NULL);
@@ -604,7 +573,6 @@ static int32_t error_after(uint16_t target_az, int16_t target_el, int32_t pan_cd
     return err != NULL ? (int32_t)atoi(err + strlen("\"err_cdeg\":")) : -1;
 }
 
-/* The examples of device-state.md §4.2. */
 static void test_the_error_is_the_angle_on_the_sky(void)
 {
     /* 359.90 against 0.10 at 30 degrees: no jump across north. */
@@ -621,7 +589,6 @@ static void test_no_reading_or_no_target_means_no_error(void)
     char json[ROTOR_STATE_JSON_MAX];
 
     new_rotor(&rotor);
-    /* The encoders know where the antenna is from boot, before any batch. */
     rotor_set_measured(&rotor, true, 4500, 1000);
     rotor_state_json(&rotor, T0, true, json, sizeof(json));
     CHECK(strstr(json, "\"meas\":{\"az_cdeg\":4500,\"el_cdeg\":1000},\"err_cdeg\":null,") != NULL);
@@ -630,12 +597,10 @@ static void test_no_reading_or_no_target_means_no_error(void)
     rotor_state_json(&rotor, T0, true, json, sizeof(json));
     CHECK(strstr(json, "\"err_cdeg\":0,") != NULL);
 
-    /* A HOLD drops the target. */
     send_hold(&rotor, T0);
     rotor_state_json(&rotor, T0, true, json, sizeof(json));
     CHECK(strstr(json, "\"meas\":{\"az_cdeg\":4500,\"el_cdeg\":1000},\"err_cdeg\":null,") != NULL);
 
-    /* A tick without a reading reports none, whatever was read before. */
     send_point(&rotor, 4500, 1000, T0, T0);
     rotor_set_measured(&rotor, false, 0, 0);
     rotor_state_json(&rotor, T0, true, json, sizeof(json));
@@ -662,8 +627,7 @@ static void test_the_longest_state_fits(void)
     rotor.pose = (pan_tilt_pose_t){17999, 9001, PAN_TILT_FLIPPED}; /* az 35999, el 8999 */
     rotor.rejected_total = UINT32_MAX;
     rotor.last_batch = (rotor_batch_report_t){true, true, INT64_MIN, INT64_MIN, true, INT64_MIN, false, "clock_not_synced"};
-    /* Measured at az 359.99 and el -90, as far as an encoder can read, against
-     * a target at the zenith: five digits everywhere. */
+    /* Measured az 359.99, el -90 against a zenith target: five digits everywhere. */
     rotor_set_measured(&rotor, true, -1, -9000);
     rotor.has_target = true;
     rotor.target = (pan_tilt_pose_t){0, 9000, PAN_TILT_NORMAL};

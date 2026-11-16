@@ -15,8 +15,7 @@
 
 #define MQTT_TOPIC_LEN 64
 
-/* The broker publishes the last will after 1.5 keepalives without traffic, so
- * this is what bounds how long a dead board still looks online. */
+/* The will fires after 1.5 keepalives, so this bounds how long a dead board looks online. */
 #define MQTT_KEEPALIVE_SEC 15
 
 #define STATUS_ONLINE "online"
@@ -51,8 +50,7 @@ static void mqtt_event_handler(void *handler_args,
         s_mqtt_connected = true;
         ESP_LOGI(TAG, "Connected to broker: %s", config_store_peek()->mqtt_uri);
 
-        /* Retained, so whoever subscribes later sees it; the last will
-         * replaces it with "offline" if the board drops. */
+        /* Retained for late subscribers; the last will overwrites it with "offline". */
         esp_mqtt_client_publish(s_client, s_status_topic, STATUS_ONLINE, 0, 1, 1);
 
         registration_msg_id = esp_mqtt_client_publish(s_client,
@@ -78,9 +76,8 @@ static void mqtt_event_handler(void *handler_args,
         break;
 
     case MQTT_EVENT_DATA:
-        /* A message bigger than the client buffer arrives split over several
-         * events. No valid payload comes close (147 bytes at most), so one
-         * that arrives split is dropped instead of being decoded in pieces. */
+        /* Oversized messages arrive split; no valid payload exceeds 147 bytes, so
+         * a split one is dropped rather than decoded in pieces. */
         if (event->current_data_offset != 0 || event->data_len != event->total_data_len) {
             ESP_LOGW(TAG, "Dropping a fragmented message (%d bytes)", event->total_data_len);
             break;

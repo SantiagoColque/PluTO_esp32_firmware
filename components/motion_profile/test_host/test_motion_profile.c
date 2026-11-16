@@ -15,19 +15,16 @@ static int s_failures;
     } while (0)
 
 #define TICK_MS 50
-#define V_MAX 6000  /* 60 degrees per second */
-#define A_MAX 12000 /* 120 degrees per second squared */
+#define V_MAX 6000  /* 60 deg/s */
+#define A_MAX 12000 /* 120 deg/s^2 */
 #define REST_MS 5000
 
-/* Float rounding allowed in a measured speed, in centidegrees per second. */
+/* Float rounding allowed in a measured speed, cdeg/s. */
 #define SPEED_SLACK 1.0f
 
 static const motion_profile_config_t LIMITED = {V_MAX, A_MAX, REST_MS};
 
-/*
- * What the servo would see: speeds and accelerations measured from the
- * successive positions, not read from the profile's own state.
- */
+/* Measured from the positions, as the servo sees them, not from profile state. */
 typedef struct {
     float last_pos;
     float last_vel;
@@ -69,8 +66,7 @@ static bool within_limits(const trace_t *trace, const motion_profile_config_t *c
            trace->max_accel <= cfg->a_max_cdeg_s2 + SPEED_SLACK / dt_s;
 }
 
-/* Steps toward a fixed target until settled, recording the trace. Returns the
- * number of steps, or -1 if it never settled. */
+/* Steps until settled, or -1 if it never does. */
 static int run_to(motion_profile_t *axis, int32_t target, int32_t dt_ms, trace_t *trace)
 {
     for (int i = 1; i <= 2000; i++) {
@@ -83,7 +79,6 @@ static int run_to(motion_profile_t *axis, int32_t target, int32_t dt_ms, trace_t
     return -1;
 }
 
-/* Steps toward a target for a while, to get the axis moving. */
 static void move_for(motion_profile_t *axis, int32_t target, int steps, trace_t *trace)
 {
     for (int i = 0; i < steps; i++) {
@@ -151,8 +146,7 @@ static void test_it_brakes_onto_the_target_without_overshoot(void)
 
 static void test_slow_limits_still_arrive(void)
 {
-    /* A fraction of a centidegree per step: whole centidegrees would round
-     * every step to nothing and never get there. */
+    /* Under a centidegree per step, which whole-number rounding would lose. */
     const motion_profile_config_t slow = {10, 20, 0};
     motion_profile_t axis;
     trace_t trace;
@@ -196,8 +190,7 @@ static void test_a_target_that_turns_around_keeps_the_acceleration_limit(void)
     motion_profile_reset(&axis, target);
     trace_start(&trace, &axis);
 
-    /* Slow enough that the axis lands on the target every step, which must
-     * not make it forget the speed it is moving at. */
+    /* Lands on the target every step, which must not reset its speed. */
     for (int i = 0; i < 20; i++) {
         target += 25;
         motion_profile_step(&axis, target, TICK_MS);
@@ -223,7 +216,6 @@ static void test_a_zero_or_negative_dt_moves_nothing(void)
     CHECK(motion_profile_step(&axis, 5000, 0) == 0);
     CHECK(motion_profile_step(&axis, 5000, -50) == 0);
 
-    /* Nor while it is moving. */
     trace_start(&trace, &axis);
     move_for(&axis, 5000, 5, &trace);
     before = motion_profile_position(&axis);
@@ -259,7 +251,6 @@ static void test_no_limits_follow_the_target_as_is(void)
     motion_profile_init(&axis, &MOTION_PROFILE_NO_LIMITS);
     CHECK(motion_profile_step(&axis, 1000, TICK_MS) == 1000);
     CHECK(motion_profile_step(&axis, 17000, TICK_MS) == 17000);
-    /* Even without any time passing: there is no profile to wait for. */
     CHECK(motion_profile_step(&axis, 250, 0) == 250);
     CHECK(motion_profile_step(&axis, 9000, -3) == 9000);
     CHECK(motion_profile_settled(&axis));
@@ -269,8 +260,8 @@ static void test_no_limits_follow_the_target_as_is(void)
 
 static void test_a_flip_is_a_ramp_within_the_range(void)
 {
-    /* Crossing north at 30 degrees of elevation (az_ref 0): 359.90 to 0.10
-     * swings the pan from 179.90 to 0.10 and the tilt from 150 to 30. */
+    /* Crossing north at 30 degrees up (az_ref 0): 359.90 to 0.10 swings the pan
+     * from 179.90 to 0.10 and the tilt from 150 to 30. */
     motion_profile_t pan;
     motion_profile_t tilt;
     trace_t pan_trace;
@@ -297,9 +288,7 @@ static void test_a_flip_is_a_ramp_within_the_range(void)
     CHECK(tilt_trace.min_pos >= 3000.0f && tilt_trace.max_pos <= 15000.0f);
     CHECK(within_limits(&pan_trace, &LIMITED, TICK_MS));
     CHECK(within_limits(&tilt_trace, &LIMITED, TICK_MS));
-    /* No slower than it needs to be: the pan reaches the top speed and the flip
-     * takes about d / v_max + v_max / a_max = 3.5 s, the time off target that
-     * coordinates-dto.md §9 warns about. */
+    /* The pan hits top speed; the flip takes about d / v_max + v_max / a_max = 3.5 s. */
     CHECK(pan_trace.max_speed >= V_MAX - SPEED_SLACK);
     CHECK(steps > 1 && steps <= 3600 / TICK_MS);
 }
@@ -313,7 +302,7 @@ static void test_a_target_moved_back_is_overshot_short_of_the_old_one(void)
     motion_profile_init(&axis, &LIMITED);
     motion_profile_reset(&axis, 0);
     trace_start(&trace, &axis);
-    move_for(&axis, 18000, 20, &trace); /* at full speed by now */
+    move_for(&axis, 18000, 20, &trace);
 
     /* Too close to stop in time: it goes past, comes back and settles. */
     closer = motion_profile_position(&axis) + 100;
@@ -343,7 +332,7 @@ static void test_a_brake_slows_down_at_the_acceleration_limit(void)
 
         motion_profile_brake(&axis, TICK_MS);
         trace_record(&trace, &axis, TICK_MS);
-        CHECK(axis.pos_cdeg >= before); /* keeps going the same way while it slows */
+        CHECK(axis.pos_cdeg >= before);
         steps++;
     }
 
@@ -352,7 +341,6 @@ static void test_a_brake_slows_down_at_the_acceleration_limit(void)
     CHECK(fabsf(axis.pos_cdeg - braking_from - 1500.0f) <= 300.0f);
     CHECK(within_limits(&trace, &LIMITED, TICK_MS));
 
-    /* Once stopped it stays put. */
     braking_from = axis.pos_cdeg;
     motion_profile_brake(&axis, TICK_MS);
     CHECK(axis.pos_cdeg == braking_from);
@@ -373,7 +361,6 @@ static void test_it_rests_after_the_timeout_at_the_same_target(void)
     motion_profile_step(&axis, 5000, TICK_MS);
     CHECK(motion_profile_resting(&axis));
 
-    /* And it stays at rest for as long as nothing changes. */
     for (int i = 0; i < 1000; i++) {
         motion_profile_step(&axis, 5000, TICK_MS);
     }
@@ -440,7 +427,6 @@ static void test_an_axis_braked_to_a_stop_rests(void)
     }
     CHECK(motion_profile_resting(&axis));
 
-    /* Any target after a stop wakes it, even the one it had before. */
     motion_profile_step(&axis, 18000, 0);
     CHECK(!motion_profile_resting(&axis));
 }

@@ -11,8 +11,8 @@ coord_dto_err_t coord_dto_decode(const uint8_t *payload, size_t payload_len, coo
         return COORD_DTO_ERR_LENGTH;
     }
 
-    /* esp-mqtt's buffer has no alignment guarantee, and an unaligned 32- or
-     * 64-bit access faults on Xtensa, so every field is copied out (§6.2). */
+    /* esp-mqtt's buffer has no alignment guarantee and an unaligned 32/64-bit
+     * access faults on Xtensa, so every field is copied out. */
     memcpy(&header, payload, sizeof(header));
 
     if (header.magic != PLUTO_DTO_MAGIC) {

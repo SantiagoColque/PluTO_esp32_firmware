@@ -270,9 +270,8 @@ esp_err_t web_server_start(void)
 
     config.stack_size = WEB_HTTPD_STACK;
     config.max_open_sockets = WEB_HTTPD_MAX_SOCKETS;
-    /* Eleven routes today. One past the limit fails to register with nothing
-     * but a log line, and takes every API route after it down too, so keep
-     * room. */
+    /* Eleven routes today. One past the limit fails with just a log line and
+     * takes every later API route down with it, so keep room. */
     config.max_uri_handlers = 16;
     /* Browsers open several parallel connections and keep them alive; without
      * this the server refuses new ones and the page half loads. */

@@ -62,7 +62,7 @@ static void test_rounds_to_the_nearest_microsecond(void)
     EXPECT_PULSE(cal, 4, 500); /* 500.44 */
     EXPECT_PULSE(cal, 5, 501); /* 500.56 */
     EXPECT_PULSE(cal, 17995, 2499); /* 2499.44 */
-    EXPECT_PULSE(narrow, 9, 1001); /* exactly 1000.5: halves go away from the 0-degree point */
+    EXPECT_PULSE(narrow, 9, 1001); /* 1000.5: halves round away from the 0-degree point */
 }
 
 static void test_a_reversed_servo_mirrors_a_normal_one(void)
@@ -74,7 +74,7 @@ static void test_a_reversed_servo_mirrors_a_normal_one(void)
     EXPECT_PULSE(cal, 4500, 2000);
     EXPECT_PULSE(cal, 18000, 500);
     EXPECT_PULSE(cal, 5, 2499);
-    EXPECT_PULSE(narrow, 9, 1999); /* the mirror of 1001 above */
+    EXPECT_PULSE(narrow, 9, 1999);
 }
 
 static void test_never_turns_past_the_calibrated_points(void)
@@ -101,9 +101,8 @@ static void test_clamps_to_the_servo_input_even_if_the_calibration_does_not(void
     EXPECT_PULSE(wide, 18000, 2500);
     EXPECT_PULSE(reversed, 0, 2500);
     EXPECT_PULSE(reversed, 18000, 500);
-    /* No overflow on the way, whatever the struct holds. */
     EXPECT_PULSE(extreme, 0, 500);
-    EXPECT_PULSE(extreme, 9000, 500); /* the middle of INT32_MIN..INT32_MAX is about 0 us */
+    EXPECT_PULSE(extreme, 9000, 500); /* midpoint of the int32 range is about 0 us */
     EXPECT_PULSE(extreme, 18000, 2500);
 }
 
@@ -113,8 +112,8 @@ static void test_duty_at_16_bits_and_50_hz(void)
     CHECK(SERVO_DUTY_RESOLUTION_BITS == 16);
 
     CHECK(servo_pulse_duty(500) == 1638);  /* 1638.4 */
-    CHECK(servo_pulse_duty(1500) == 4915); /* 4915.2 */
-    CHECK(servo_pulse_duty(2500) == 8192); /* exact */
+    CHECK(servo_pulse_duty(1500) == 4915);
+    CHECK(servo_pulse_duty(2500) == 8192);
     CHECK(servo_pulse_duty(834) == 2733);  /* 2732.85 */
     CHECK(servo_pulse_duty(2166) == 7098); /* 7097.55 */
 }
@@ -148,23 +147,20 @@ static void test_which_calibrations_are_valid(void)
     CHECK(!servo_calibration_valid(&above));
 }
 
-/* The pulses are stored in NVS, which holds whatever was written: a value that
- * menuconfig's 500..2500 range would never let through, or a reversed servo
- * with a point out of range on the side the forward cases above do not try. */
 static void test_a_stored_calibration_is_checked_on_both_points(void)
 {
     const servo_calibration_t valid[] = {
         {.us_at_0 = 500, .us_at_180 = 2500},
         {.us_at_0 = 2500, .us_at_180 = 500},
-        {.us_at_0 = 500, .us_at_180 = 501}, /* one microsecond apart still drives it */
+        {.us_at_0 = 500, .us_at_180 = 501},
         {.us_at_0 = 2166, .us_at_180 = 834},
     };
     const servo_calibration_t invalid[] = {
-        {.us_at_0 = 2501, .us_at_180 = 500}, /* reversed, 0-degree point above the range */
-        {.us_at_0 = 2500, .us_at_180 = 499}, /* reversed, 180-degree point below it */
+        {.us_at_0 = 2501, .us_at_180 = 500},
+        {.us_at_0 = 2500, .us_at_180 = 499},
         {.us_at_0 = 500, .us_at_180 = 499},
         {.us_at_0 = 2501, .us_at_180 = 2500},
-        {.us_at_0 = 500, .us_at_180 = 500}, /* flat on the edges */
+        {.us_at_0 = 500, .us_at_180 = 500},
         {.us_at_0 = 2500, .us_at_180 = 2500},
         {.us_at_0 = -1500, .us_at_180 = 1500},
         {.us_at_0 = 1500, .us_at_180 = -1500},

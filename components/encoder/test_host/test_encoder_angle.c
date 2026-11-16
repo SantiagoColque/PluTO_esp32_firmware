@@ -47,8 +47,7 @@ static void test_a_reversed_encoder_counts_down(void)
     EXPECT_ANGLE(reversed, 952, 18000);
 }
 
-/* The servo uses half a turn of the encoder's whole one: a little past either
- * end of the travel reads as just outside 0..18000, never as the far side. */
+/* Just past either end of the travel reads just outside 0..18000, not the far side. */
 static void test_the_turn_is_split_around_the_travel(void)
 {
     const encoder_calibration_t zero = {.zero_raw = 100, .dir = 1};

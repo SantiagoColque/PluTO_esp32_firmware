@@ -29,7 +29,7 @@ static const char *load_batch(rotor_t *rotor, const coord_dto_msg_t *msg, int64_
         return NULL;
     }
 
-    /* Without a synced clock the target instants mean nothing (§6.4). */
+    /* Without a synced clock the target instants mean nothing. */
     if (!clock_synced) {
         return "clock_not_synced";
     }
@@ -39,7 +39,7 @@ static const char *load_batch(rotor_t *rotor, const coord_dto_msg_t *msg, int64_
         points[i].az_cdeg = msg->points[i].az_cdeg;
         points[i].el_cdeg = msg->points[i].el_cdeg;
 
-        /* Rejected whole rather than clipped (§9). */
+        /* Rejected whole rather than clipped. */
         if (!pan_tilt_reachable(&rotor->mount, points[i].az_cdeg, points[i].el_cdeg)) {
             return "unreachable";
         }
@@ -91,7 +91,7 @@ static int32_t clamp(int32_t value, int32_t min, int32_t max)
     return value < min ? min : value > max ? max : value;
 }
 
-/* Copies the profiled angles into the commanded pose. Returns true if they changed. */
+/* True if the pose changed. */
 static bool update_pose(rotor_t *rotor)
 {
     pan_tilt_pose_t pose;
@@ -106,9 +106,8 @@ static bool update_pose(rotor_t *rotor)
                           rotor->mount.pan_max_cdeg);
     pose.tilt_cdeg = clamp(motion_profile_position(&rotor->tilt_axis), rotor->mount.tilt_min_cdeg,
                            rotor->mount.tilt_max_cdeg);
-    /* Halfway through a flip the tilt can still be on the old side of the
-     * zenith: the pose takes the mode it is physically in, with the target's
-     * as the tie-break on the zenith itself. */
+    /* Mid-flip the tilt can still be on the old side of the zenith: take the
+     * mode it is physically in, with the target's breaking ties at the zenith. */
     pose.mode = rotor->target.mode;
     pose.mode = pan_tilt_pose_mode(&pose);
 
@@ -127,10 +126,8 @@ bool rotor_tick(rotor_t *rotor, int64_t now_ms, int32_t dt_ms)
     bool following = trajectory_target(&rotor->trajectory, now_ms, &az_cdeg, &el_cdeg);
     bool changed;
 
-    /* An unreachable intermediate target keeps the last one: never move
-     * toward something the mount cannot point at. The hysteresis goes by the
-     * target's mode, not by the servos': halfway through a flip they are
-     * between modes, and going by them could turn the flip back. */
+    /* An unreachable target keeps the last one. Hysteresis follows the target's
+     * mode, not the servos': mid-flip they sit between modes and could undo it. */
     if (following && pan_tilt_from_azel(&rotor->mount,
                                         rotor->has_target ? rotor->target.mode : PAN_TILT_NORMAL,
                                         az_cdeg,
@@ -144,8 +141,7 @@ bool rotor_tick(rotor_t *rotor, int64_t now_ms, int32_t dt_ms)
         motion_profile_step(&rotor->pan_axis, rotor->target.pan_cdeg, dt_ms);
         motion_profile_step(&rotor->tilt_axis, rotor->target.tilt_cdeg, dt_ms);
     } else {
-        /* After a HOLD, or before any target: whatever is moving slows down
-         * at the acceleration limit instead of stopping dead (§6.6). */
+        /* After a HOLD or before any target: brake at the limit, not dead. */
         motion_profile_brake(&rotor->pan_axis, dt_ms);
         motion_profile_brake(&rotor->tilt_axis, dt_ms);
     }
@@ -155,8 +151,7 @@ bool rotor_tick(rotor_t *rotor, int64_t now_ms, int32_t dt_ms)
         rotor->mode = rotor->received_any ? ROTOR_MODE_HOLDING : ROTOR_MODE_IDLE;
     } else if (now_ms < rotor->trajectory.points[rotor->trajectory.count - 1].t_ms ||
                !motion_profile_settled(&rotor->pan_axis) || !motion_profile_settled(&rotor->tilt_axis)) {
-        /* Past the last point but still on the way to it is not holding yet:
-         * device-state.md describes holding as standing still. */
+        /* Still moving toward the last point is tracking; holding means standing still. */
         rotor->mode = ROTOR_MODE_TRACKING;
     } else {
         rotor->mode = ROTOR_MODE_HOLDING;
@@ -217,9 +212,8 @@ static int write_batch_json(const rotor_batch_report_t *report, char *buf, size_
                     error);
 }
 
-/* The angle on the sky between two directions (device-state.md §4.2), which
- * unlike an azimuth difference neither jumps at north nor blows up near the
- * zenith. */
+/* Great-circle angle, which unlike an azimuth difference neither jumps at
+ * north nor blows up near the zenith. */
 static int32_t angle_between_cdeg(int32_t az1, int32_t el1, int32_t az2, int32_t el2)
 {
     const double rad = M_PI / 18000.0;
@@ -245,9 +239,8 @@ static void write_measured_json(const rotor_t *rotor, char *meas, size_t meas_le
     pan_tilt_to_azel(&rotor->mount, &rotor->measured, &meas_az, &meas_el);
     snprintf(meas, meas_len, "{\"az_cdeg\":%" PRId32 ",\"el_cdeg\":%" PRId32 "}", meas_az, meas_el);
 
-    /* Against the target rather than the commanded pose, which lags it on
-     * purpose under the motion profile. A HOLD empties the trajectory, and
-     * with it the target. */
+    /* Against the target, not the pose, which lags it on purpose under the
+     * motion profile. A HOLD empties the trajectory and with it the target. */
     if (rotor->has_target && rotor->trajectory.count > 0) {
         pan_tilt_to_azel(&rotor->mount, &rotor->target, &target_az, &target_el);
         snprintf(err, err_len, "%" PRId32, angle_between_cdeg(meas_az, meas_el, target_az, target_el));

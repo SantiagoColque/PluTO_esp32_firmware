@@ -57,15 +57,16 @@ static void json_copy_string(const cJSON *root, const char *key, char *dest, siz
 }
 
 /**
- * @brief Read a whole number out of a JSON object. False when the field is
- *        absent, not a number, fractional or past the range of an int.
+ * @brief Read a whole number out of a JSON object.
+ *
+ * False when absent, not a number, fractional or out of int range.
  */
 static bool json_get_int32(const cJSON *root, const char *key, int32_t *out)
 {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
 
-    /* cJSON also keeps every number as an int, truncated and saturated, so the
-     * two agree only for a whole number that fits. */
+    /* valueint is truncated and saturated, so it matches valuedouble only for a
+     * whole number in range. */
     if (!cJSON_IsNumber(item) || (double)item->valueint != item->valuedouble) {
         return false;
     }
@@ -352,7 +353,7 @@ static esp_err_t calibration_get_handler(httpd_req_t *req)
         return web_send_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
     }
 
-    /* The keys are the field names of pluto_calibration_t, units included. */
+    /* Keys are the pluto_calibration_t field names, units included. */
     cJSON_AddNumberToObject(root, "az_ref_cdeg", cal.az_ref_cdeg);
     cJSON_AddNumberToObject(root, "pan_min_cdeg", cal.pan_min_cdeg);
     cJSON_AddNumberToObject(root, "pan_max_cdeg", cal.pan_max_cdeg);
@@ -426,8 +427,7 @@ static esp_err_t calibration_post_handler(httpd_req_t *req)
         return web_send_error(req, HTTPD_400_BAD_REQUEST, "Every calibration field is required, as a whole number");
     }
 
-    /* The checks start_rotor() makes at boot, made here as well so that a
-     * calibration that would keep the servos stopped is never stored. */
+    /* start_rotor()'s boot checks, so a config that keeps the servos off is never stored. */
     mount = (pan_tilt_config_t){
         .az_ref_cdeg = cal.az_ref_cdeg,
         .pan_min_cdeg = cal.pan_min_cdeg,
@@ -461,8 +461,7 @@ static esp_err_t calibration_post_handler(httpd_req_t *req)
         return web_send_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Unable to save the calibration");
     }
 
-    /* Not applied live: the rotor and the servo driver take it at boot. The
-     * restart is left to the user, so saving does not cut a pass short. */
+    /* Applied at boot; the user restarts, so saving does not cut a pass short. */
     return web_send_json(req, "{\"ok\":true,\"restart_required\":true}");
 }
 

@@ -15,8 +15,7 @@ static int32_t wrap_azimuth(int64_t az_cdeg)
     return (int32_t)wrapped;
 }
 
-/* Signed azimuth change from `from` to `to` along the shorter way around, so
- * crossing north goes 359.50 -> 0.00 -> 0.50 instead of all the way back. */
+/* Shorter way around, so crossing north goes 359.50 -> 0.50, not all the way back. */
 static int32_t shortest_azimuth_delta(int32_t from, int32_t to)
 {
     int32_t delta = to - from;
@@ -61,18 +60,15 @@ size_t trajectory_load(trajectory_t *traj,
         return 0;
     }
 
-    /* The batch arrives about 2 s before its first point (§10), so what is
-     * pending until then stays, or the target would jump ahead. Strictly
-     * before, so no two points share an instant. */
+    /* A batch arrives ~2 s before its first point, so pending points before it
+     * stay or the target would jump ahead. Strictly before, so no instant repeats. */
     while (old_kept < traj->count && traj->points[old_kept].t_ms < points[0].t_ms) {
         old_kept++;
     }
     new_count = count - first_kept;
 
-    /* Out of room, the oldest go first. With the server's cadence, 5 points
-     * 2 s ahead (§10), those have already passed as long as the points are at
-     * least 200 ms apart; a longer batch or closer points leave no room and
-     * the target jumps ahead. */
+    /* Out of room, the oldest go first. At the server's cadence (5 points, 2 s ahead)
+     * they have passed if points are 200+ ms apart; otherwise the target jumps ahead. */
     if (old_kept + new_count > TRAJECTORY_MAX_POINTS) {
         size_t dropped = old_kept + new_count - TRAJECTORY_MAX_POINTS;
 
@@ -120,7 +116,7 @@ bool trajectory_target(const trajectory_t *traj, int64_t now_ms, int32_t *az_cde
         }
     }
 
-    /* Past the last point: stay there rather than extrapolate (§6.7). */
+    /* Past the last point: stay there rather than extrapolate. */
     last = &traj->points[traj->count - 1];
     *az_cdeg = last->az_cdeg;
     *el_cdeg = last->el_cdeg;

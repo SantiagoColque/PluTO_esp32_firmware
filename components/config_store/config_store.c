@@ -29,16 +29,9 @@
 #define KEY_ADMIN_PASS "admin_pass"
 #define KEY_HOME_CHANNEL "home_ch"
 
-/*
- * The mount's calibration gets a namespace of its own because
- * config_store_factory_reset() erases CONFIG_STORE_NAMESPACE whole to bring the
- * setup portal back, and moving to another WiFi network says nothing about
- * where the antenna points.
- *
- * It is still lost when init_nvs() in main.c erases the entire NVS partition,
- * which it does on ESP_ERR_NVS_NO_FREE_PAGES or ESP_ERR_NVS_NEW_VERSION_FOUND.
- * The next boot then seeds it from menuconfig again, like the rest.
- */
+/* Own namespace so a factory reset, which erases pluto_cfg whole, keeps it: a new
+ * WiFi network says nothing about where the antenna points. Still lost when
+ * init_nvs() erases the whole partition, and then reseeded from menuconfig. */
 #define CALIBRATION_NAMESPACE "pluto_cal"
 
 #define KEY_CAL_AZ_REF "az_ref"
@@ -58,8 +51,7 @@
 static const char *TAG = "config_store";
 
 static pluto_config_t s_cache;
-/* Guarded by s_mutex, like s_cache: the dashboard writes it while main may be
- * reading it in start_rotor(). */
+/* Guarded by s_mutex: the dashboard writes it while start_rotor() may read it. */
 static pluto_calibration_t s_calibration;
 static SemaphoreHandle_t s_mutex;
 static bool s_initialized;
@@ -130,8 +122,7 @@ static void apply_calibration_seed(pluto_calibration_t *cal)
     cal->pan_max_cdeg = CONFIG_PLUTO_CAL_PAN_MAX_CDEG;
     cal->tilt_min_cdeg = CONFIG_PLUTO_CAL_TILT_MIN_CDEG;
     cal->tilt_max_cdeg = CONFIG_PLUTO_CAL_TILT_MAX_CDEG;
-    /* The pulses' seed lives in the servo component's menu, next to the
-     * DS3218 version that sets their defaults, rather than in main's. */
+    /* Pulse seeds live in the servo menu, next to the DS3218 version that sets them. */
     cal->pan_us_at_0 = CONFIG_PLUTO_SERVO_PAN_US_AT_0;
     cal->pan_us_at_180 = CONFIG_PLUTO_SERVO_PAN_US_AT_180;
     cal->tilt_us_at_0 = CONFIG_PLUTO_SERVO_TILT_US_AT_0;
@@ -143,8 +134,7 @@ static void apply_calibration_seed(pluto_calibration_t *cal)
     cal->tilt_enc_dir = 1;
 }
 
-/* One key per field, like pluto_cfg, so a field added later loads on a device
- * that never stored it (it keeps its seed), without a migration. */
+/* One key per field, so a field added later keeps its seed on older devices. */
 static esp_err_t write_calibration(nvs_handle_t handle, const pluto_calibration_t *cal)
 {
     ESP_RETURN_ON_ERROR(nvs_set_i32(handle, KEY_CAL_AZ_REF, cal->az_ref_cdeg), TAG, "az_ref");
@@ -174,11 +164,7 @@ static void load_i32(nvs_handle_t handle, const char *key, int32_t *dest)
     }
 }
 
-/*
- * Fills cal from NVS, or seeds NVS when it holds no calibration yet. On any
- * error cal is left holding the menuconfig seed, so the caller always has a
- * value to hand on; it is range-checked again before the rotor uses it.
- */
+/* On any error cal keeps the menuconfig seed; the rotor range-checks it again. */
 static esp_err_t load_calibration(pluto_calibration_t *cal)
 {
     nvs_handle_t handle;
@@ -295,8 +281,7 @@ esp_err_t config_store_init(void)
 
     memcpy(&s_cache, &cfg, sizeof(s_cache));
 
-    /* Not fatal: the network configuration above is what keeps the dashboard
-     * reachable to fix things, and a reboot loop over the mount would lose it. */
+    /* Not fatal: a reboot loop over the mount would lose the dashboard needed to fix it. */
     err = load_calibration(&s_calibration);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Mount calibration not loaded from NVS (%s); using the menuconfig seed",

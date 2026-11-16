@@ -28,18 +28,16 @@
 
 static const char *TAG = "pluto_main";
 
-/* Shared between the MQTT task, which hands in payloads, and the rotor task,
- * which advances the trajectory. */
+/* Shared by the MQTT task and the rotor task. */
 static rotor_t s_rotor;
 static SemaphoreHandle_t s_rotor_lock;
 
-/* The mode in the last state published, so a change of mode (the end of a
- * pass, for one) is reported right away and only once. */
+/* Mode of the last published state, so a mode change is reported once, right away. */
 static rotor_mode_t s_reported_mode = ROTOR_MODE_IDLE;
 
 #if CONFIG_PLUTO_ENCODERS
-/* The AS5600's address is fixed, so each encoder gets a bus of its own, on
- * pins clear of the servos and of the strapping and flash pins. */
+/* The AS5600 address is fixed, so one bus per encoder, on pins clear of the
+ * servos and of the strapping and flash pins. */
 #define ENCODER_PAN_SDA_GPIO 21
 #define ENCODER_PAN_SCL_GPIO 22
 #define ENCODER_TILT_SDA_GPIO 32
@@ -74,7 +72,7 @@ static void publish_state(void)
         ESP_LOGE(TAG, "State does not fit in %d bytes", (int)sizeof(json));
         return;
     }
-    /* Nothing to do while disconnected: the next state after reconnecting is current anyway. */
+    /* Dropped while offline; the next state after reconnecting is current anyway. */
     mqtt_manager_publish_state(json, len);
 }
 
@@ -178,19 +176,17 @@ static void coordinates_message_handler(const char *topic,
         ESP_LOGW(TAG, "Batch rejected: %s", error);
     }
 
-    /* The server hears about every batch right away instead of on the next
-     * period (device-state.md §3). */
+    /* Every batch is reported right away, not on the next period. */
     publish_state();
 }
 
-/* The servo angles the encoders read. False without encoders, or when either
- * one has no reading: the state then reports none. */
+/* False without encoders, or when either one has no reading. */
 static bool read_encoders(int32_t *pan_cdeg, int32_t *tilt_cdeg)
 {
 #if CONFIG_PLUTO_ENCODERS
     uint16_t pan_raw;
     uint16_t tilt_raw;
-    /* Both every tick, so the log follows each one's problems. */
+    /* Read both even if one fails, so the log shows each one's errors. */
     bool pan_ok = as5600_read(&s_pan_encoder, &pan_raw) == ESP_OK;
     bool tilt_ok = as5600_read(&s_tilt_encoder, &tilt_raw) == ESP_OK;
 
@@ -212,8 +208,7 @@ static void rotor_task(void *arg)
     TickType_t last_state = xTaskGetTickCount();
     rotor_mode_t last_mode = ROTOR_MODE_IDLE;
     bool last_resting = true;
-    /* The servos move in monotonic time: SNTP steps the wall clock, and a
-     * jump there must not become a jump of the antenna. */
+    /* Monotonic: an SNTP step of the wall clock must not jump the antenna. */
     int64_t last_tick_us = esp_timer_get_time();
 
     (void)arg;
@@ -230,8 +225,7 @@ static void rotor_task(void *arg)
         bool measured;
         int32_t dt_ms = (int32_t)((esp_timer_get_time() - last_tick_us) / 1000);
 
-        /* Advanced by whole milliseconds so the remainder carries over to the
-         * next tick instead of making the profile run slow. */
+        /* Carry the sub-ms remainder over, or the profile runs slow. */
         last_tick_us += (int64_t)dt_ms * 1000;
 
         /* Before taking the lock: the I2C reads would hold off the MQTT handler. */
@@ -247,9 +241,8 @@ static void rotor_task(void *arg)
         mode_unreported = mode != s_reported_mode;
         xSemaphoreGive(s_rotor_lock);
 
-        /* Outside the lock, every tick: the driver skips a duty it already has
-         * and resumes released outputs on the next set. Its only error is "not
-         * started", which start_rotor() has already logged. */
+        /* Every tick, outside the lock; the driver skips an unchanged duty. Its
+         * only error is "not started", already logged by start_rotor(). */
         if (resting) {
             servo_driver_release();
         } else if (has_pose) {
@@ -281,7 +274,7 @@ static void start_rotor(void)
     pluto_calibration_t cal;
     pan_tilt_config_t mount;
     servo_driver_config_t servos;
-    /* Kconfig is in degrees for whoever tunes it, the profile in centidegrees. */
+    /* Kconfig takes degrees, the profile centidegrees. */
     const motion_profile_config_t motion = {
         .v_max_cdeg_s = CONFIG_PLUTO_MOTION_MAX_SPEED_DEG_S * 100,
         .a_max_cdeg_s2 = CONFIG_PLUTO_MOTION_MAX_ACCEL_DEG_S2 * 100,
@@ -298,8 +291,7 @@ static void start_rotor(void)
         .tilt_min_cdeg = cal.tilt_min_cdeg,
         .tilt_max_cdeg = cal.tilt_max_cdeg,
     };
-    /* The pins follow the wiring, so they stay in Kconfig; the pulses are part
-     * of the stored calibration. */
+    /* Pins follow the wiring (Kconfig); pulses are part of the stored calibration. */
     servos = (servo_driver_config_t){
         .pan = {.gpio_num = CONFIG_PLUTO_SERVO_PAN_GPIO, .calibration = {cal.pan_us_at_0, cal.pan_us_at_180}},
         .tilt = {.gpio_num = CONFIG_PLUTO_SERVO_TILT_GPIO, .calibration = {cal.tilt_us_at_0, cal.tilt_us_at_180}},
@@ -312,22 +304,19 @@ static void start_rotor(void)
              (long)mount.tilt_min_cdeg,
              (long)mount.tilt_max_cdeg);
 
-    /* Any fallback for a bad stored calibration is a guess that could drive
-     * the mount past limits someone set, so the servos stay still instead.
-     * Not worth a reboot loop either: the board keeps reporting, with the
-     * dashboard and /logs reachable to say why. */
+    /* Any fallback could drive the mount past its set limits, so the servos stay
+     * off; no reboot loop either, so /logs can say why. */
     if (!pan_tilt_config_valid(&mount)) {
         ESP_LOGE(TAG, "Stored mount calibration is invalid; servos not started");
         mount = PAN_TILT_CONFIG_DEFAULT; /* only so the rotor keeps reporting */
-    } else if (servo_driver_init(&servos) != ESP_OK) { /* refuses bad pulses or pins */
+    } else if (servo_driver_init(&servos) != ESP_OK) {
         ESP_LOGE(TAG, "Servos not started; tracking without moving the mount");
     }
 
 #if CONFIG_PLUTO_ENCODERS
     s_pan_encoder_cal = (encoder_calibration_t){cal.pan_enc_zero, cal.pan_enc_dir};
     s_tilt_encoder_cal = (encoder_calibration_t){cal.tilt_enc_zero, cal.tilt_enc_dir};
-    /* A failed init is logged and leaves the state without a measurement; the
-     * servos do not depend on the encoders. */
+    /* A failed init only leaves the state without a measurement. */
     as5600_init(&s_pan_encoder, "pan", I2C_NUM_0,
                 ENCODER_PAN_SDA_GPIO, ENCODER_PAN_SCL_GPIO);
     as5600_init(&s_tilt_encoder, "tilt", I2C_NUM_1,

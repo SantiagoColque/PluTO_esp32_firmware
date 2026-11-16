@@ -15,7 +15,6 @@ static int s_failures;
 #define T0 1789763400000LL
 #define TOLERANCE_MS 500
 
-/* Asks for the target at `now` and checks it. */
 static void expect_target(const trajectory_t *traj, int64_t now, int32_t az, int32_t el, int line)
 {
     int32_t got_az = -1;
@@ -55,12 +54,12 @@ static void test_follows_the_points_in_time(void)
 
     EXPECT_TARGET(&traj, T0 - 2000, 10000, 2000); /* before the first: the first */
     EXPECT_TARGET(&traj, T0, 10000, 2000);
-    EXPECT_TARGET(&traj, T0 + 500, 10500, 2500); /* halfway: interpolated */
+    EXPECT_TARGET(&traj, T0 + 500, 10500, 2500);
     EXPECT_TARGET(&traj, T0 + 250, 10250, 2250);
     EXPECT_TARGET(&traj, T0 + 1000, 11000, 3000);
     EXPECT_TARGET(&traj, T0 + 1500, 11500, 2500);
     EXPECT_TARGET(&traj, T0 + 2000, 12000, 2000);
-    EXPECT_TARGET(&traj, T0 + 60000, 12000, 2000); /* long after the last: stays there */
+    EXPECT_TARGET(&traj, T0 + 60000, 12000, 2000);
 }
 
 static void test_azimuth_crosses_north_the_short_way(void)
@@ -80,7 +79,6 @@ static void test_azimuth_crosses_north_the_short_way(void)
     EXPECT_TARGET(&traj, T0 + 1500, 35950, 1000);
 }
 
-/* Points first.. of a straight stretch of sky, one a second from t0. */
 static void fill_line(trajectory_point_t *points, int first, int count)
 {
     for (int i = first; i < first + count; i++) {
@@ -88,9 +86,7 @@ static void fill_line(trajectory_point_t *points, int first, int count)
     }
 }
 
-/* The server publishes each batch 2 s before its first point, five points
- * every two (coordinates-dto.md §10). The next batch must not pull the target
- * ahead to its first point: following both is following the whole stretch. */
+/* The server sends each batch 2 s early, five points every two seconds. */
 static void test_a_batch_sent_early_does_not_pull_the_target_ahead(void)
 {
     trajectory_t traj;
@@ -106,7 +102,7 @@ static void test_a_batch_sent_early_does_not_pull_the_target_ahead(void)
     trajectory_init(&traj);
     trajectory_load(&traj, first, 5, T0 - 2000, TOLERANCE_MS);
     CHECK(trajectory_load(&traj, second, 5, T0, TOLERANCE_MS) == 5);
-    EXPECT_TARGET(&traj, T0, 10000, 2000); /* not the second batch's first point */
+    EXPECT_TARGET(&traj, T0, 10000, 2000);
 
     trajectory_init(&whole);
     trajectory_load(&whole, all, 7, T0, TOLERANCE_MS);
@@ -129,12 +125,11 @@ static void test_a_new_batch_wins_from_its_first_point_on(void)
     CHECK(trajectory_load(&traj, newer, 2, T0, TOLERANCE_MS) == 2);
 
     EXPECT_TARGET(&traj, T0 + 250, 15000, 3000); /* from the old first point to the new one */
-    EXPECT_TARGET(&traj, T0 + 1000, 20500, 4000); /* the old second point is gone */
-    EXPECT_TARGET(&traj, T0 + 1900, 21000, 4000); /* and so is the third */
+    EXPECT_TARGET(&traj, T0 + 1000, 20500, 4000);
+    EXPECT_TARGET(&traj, T0 + 1900, 21000, 4000);
 }
 
-/* The cut is at the batch's first instant even when that point has expired
- * (§6.7), so the old point there goes too: the batch was meant to replace it. */
+/* The batch was meant to replace the old point at its first instant. */
 static void test_the_cut_is_at_the_first_point_even_if_it_expired(void)
 {
     trajectory_t traj;
@@ -153,9 +148,6 @@ static void test_the_cut_is_at_the_first_point_even_if_it_expired(void)
     EXPECT_TARGET(&traj, T0 + 1600, 18800, 3600); /* from the old t0 point to the new t0+2000 one */
 }
 
-/* Out of room, the oldest points go and the new batch's never do. With the
- * server's cadence, 5 points 2 s ahead (§10), the ones that go have already
- * passed as long as the points are at least 200 ms apart. */
 static void test_out_of_room_the_oldest_points_go(void)
 {
     trajectory_t traj;
@@ -170,12 +162,10 @@ static void test_out_of_room_the_oldest_points_go(void)
     fill_line(newer, 14, 4);
     CHECK(trajectory_load(&traj, newer, 4, T0 + 12000, TOLERANCE_MS) == 4);
     CHECK(traj.count == TRAJECTORY_MAX_POINTS && traj.points[0].t_ms == T0 + 2000);
-    EXPECT_TARGET(&traj, T0 + 12500, 11250, 2625); /* still on the old points */
-    EXPECT_TARGET(&traj, T0 + 17000, 11700, 2850); /* the new last point is there */
+    EXPECT_TARGET(&traj, T0 + 12500, 11250, 2625);
+    EXPECT_TARGET(&traj, T0 + 17000, 11700, 2850);
 
-    /* A full batch leaves no room for anything older, so even the current
-     * point and the next one go and the target jumps 2 s ahead, to its first
-     * point. */
+    /* A full batch leaves no room for older points, so the target jumps 2 s ahead. */
     fill_line(newer, 16, TRAJECTORY_MAX_POINTS);
     CHECK(trajectory_load(&traj, newer, TRAJECTORY_MAX_POINTS, T0 + 14000, TOLERANCE_MS) ==
           TRAJECTORY_MAX_POINTS);
@@ -183,9 +173,6 @@ static void test_out_of_room_the_oldest_points_go(void)
     EXPECT_TARGET(&traj, T0 + 14000, 11600, 2800);
 }
 
-/* With nothing pending there is nothing to come from: the target is the
- * first point as soon as the batch arrives, so the antenna is there when the
- * pass starts. */
 static void test_after_a_hold_the_target_starts_on_the_first_point(void)
 {
     trajectory_t traj;
@@ -209,7 +196,6 @@ static void test_expired_points_are_dropped(void)
     CHECK(trajectory_load(&traj, THREE_POINTS, 3, T0 + 1200, TOLERANCE_MS) == 2);
     EXPECT_TARGET(&traj, T0 + 1200, 11200, 2800); /* 20% of the way from the second point to the third */
 
-    /* Within the tolerance a late point is still kept. */
     CHECK(trajectory_load(&traj, THREE_POINTS, 3, T0 + TOLERANCE_MS, TOLERANCE_MS) == 3);
 }
 

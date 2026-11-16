@@ -29,19 +29,9 @@ typedef struct {
     bool provisioned;
 } pluto_config_t;
 
-/*
- * The mount's calibration. The geographic heading the pan faces at 0 and the
- * usable range of each joint, in centidegrees, mean what the fields of the
- * same name in pan_tilt.h do. The pulses, in microseconds, are each servo's
- * two-point calibration: the pulse that puts it at 0 degrees and the one that
- * puts it at 180, as in servo_calibration_t (servo_pulse.h). Each encoder's
- * zero and direction are encoder_calibration_t's (encoder_angle.h). Plain
- * integers rather than those types so this component depends on neither the
- * kinematics, the servo driver nor the encoders; main converts them.
- *
- * Stored apart from pluto_config_t, in a namespace of its own, so that
- * re-provisioning the WiFi with config_store_factory_reset() does not lose it.
- */
+/* Mount calibration: fields as in pan_tilt.h, servo_pulse.h and encoder_angle.h,
+ * as plain ints so this component depends on none of them. Own NVS namespace,
+ * so config_store_factory_reset() keeps it. */
 typedef struct {
     int32_t az_ref_cdeg;
     int32_t pan_min_cdeg;
@@ -67,30 +57,25 @@ esp_err_t config_store_set_home_channel(uint8_t channel);
 bool config_store_is_provisioned(void);
 
 /**
- * @brief Erase the network and dashboard configuration (pluto_config_t).
+ * @brief Erase the network and dashboard configuration.
  *
- * The mount's calibration lives in another namespace and is kept.
+ * The mount calibration is kept.
  */
 esp_err_t config_store_factory_reset(void);
 
 /**
  * @brief Copy the mount's calibration.
  *
- * config_store_init() loads it: from NVS when it holds one, otherwise from the
- * menuconfig seed (PLUTO_CAL_* for the mount, PLUTO_SERVO_*_US_AT_* for the
- * pulses, and zero 0 and direction +1 for the encoders), which is then written
- * to NVS. It is not range-checked here: check the mount with
- * pan_tilt_config_valid(), and servo_driver_init() checks the pulses.
+ * Loaded at init from NVS, or seeded from menuconfig and saved. Not checked:
+ * use pan_tilt_config_valid(); servo_driver_init() checks the pulses.
  */
 esp_err_t config_store_get_calibration(pluto_calibration_t *out);
 
 /**
- * @brief Store the mount's calibration in NVS and in the copy the getter hands
- * out.
+ * @brief Store the mount's calibration in NVS.
  *
- * Checks nothing, like the getter: the caller validates first. The rotor and
- * the servos keep what they read at boot, so a new calibration applies on the
- * next restart.
+ * Unchecked; validate first. Rotor and servos read it at boot, so it applies on
+ * the next restart.
  */
 esp_err_t config_store_set_calibration(const pluto_calibration_t *in);
 
