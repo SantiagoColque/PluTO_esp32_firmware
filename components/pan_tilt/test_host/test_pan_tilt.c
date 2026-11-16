@@ -41,7 +41,7 @@ static void test_back_half_points_past_the_zenith(void)
 {
     pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
 
-    /* Due west at 30 degrees: pan 90 and tilt 150, i.e. 30 degrees above the horizon behind. */
+    /* Due west at 30 degrees: pan 90, tilt 150. */
     EXPECT_POSE(&cfg, PAN_TILT_NORMAL, 27000, 3000, PAN_TILT_FLIPPED, 9000, 15000);
 }
 
@@ -96,7 +96,7 @@ static void test_narrowed_servo_ranges_are_enforced(void)
     CHECK(pan_tilt_reachable(&cfg, 9000, 3000));
 
     cfg = PAN_TILT_CONFIG_DEFAULT;
-    cfg.tilt_max_cdeg = 12000; /* cannot lean back further than 30 degrees past the zenith */
+    cfg.tilt_max_cdeg = 12000; /* 30 degrees past the zenith */
     CHECK(pan_tilt_reachable(&cfg, 27000, 7000));  /* flipped tilt 110 */
     CHECK(!pan_tilt_reachable(&cfg, 27000, 5000)); /* flipped tilt 130 */
 }
@@ -165,8 +165,7 @@ static void test_az_ref_must_be_a_heading(void)
 
     cfg.az_ref_cdeg = 35999;
     CHECK(pan_tilt_config_valid(&cfg));
-    /* 360 degrees is north again; only the 0 spelling is accepted, so a stored
-     * value has a single meaning. */
+    /* 360 is north again; only 0 is accepted, so a stored value has one meaning. */
     cfg.az_ref_cdeg = 36000;
     CHECK(!pan_tilt_config_valid(&cfg));
     cfg.az_ref_cdeg = -1;
@@ -204,8 +203,7 @@ static void test_each_range_must_be_open(void)
 {
     pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
 
-    /* An empty range would make every batch unreachable, which looks like a
-     * server bug from the other side. */
+    /* An empty range makes every batch unreachable, which looks like a server bug. */
     cfg.pan_min_cdeg = 9000;
     cfg.pan_max_cdeg = 9000;
     CHECK(!pan_tilt_config_valid(&cfg));
@@ -222,7 +220,7 @@ static void test_each_range_must_be_open(void)
     cfg = PAN_TILT_CONFIG_DEFAULT;
     cfg.pan_min_cdeg = 17999;
     cfg.tilt_max_cdeg = 1;
-    CHECK(pan_tilt_config_valid(&cfg)); /* narrow, but not empty */
+    CHECK(pan_tilt_config_valid(&cfg));
 }
 
 static void test_a_missing_config_is_invalid(void)
@@ -233,8 +231,7 @@ static void test_a_missing_config_is_invalid(void)
 static void test_a_pose_between_modes_reports_where_it_points(void)
 {
     pan_tilt_config_t cfg = PAN_TILT_CONFIG_DEFAULT;
-    /* Halfway through a flip toward due west at 30 degrees: the tilt is already
-     * past the zenith while the label still says normal. */
+    /* Mid-flip to due west: the tilt is past the zenith, the label still normal. */
     pan_tilt_pose_t pose = {.pan_cdeg = 9000, .tilt_cdeg = 12000, .mode = PAN_TILT_NORMAL};
     int32_t az;
     int32_t el;
@@ -243,7 +240,6 @@ static void test_a_pose_between_modes_reports_where_it_points(void)
     pan_tilt_to_azel(&cfg, &pose, &az, &el);
     CHECK(az == 27000 && el == 6000);
 
-    /* And the other way round, a flipped label still in front of the zenith. */
     pose = (pan_tilt_pose_t){.pan_cdeg = 9000, .tilt_cdeg = 6000, .mode = PAN_TILT_FLIPPED};
     CHECK(pan_tilt_pose_mode(&pose) == PAN_TILT_NORMAL);
     pan_tilt_to_azel(&cfg, &pose, &az, &el);

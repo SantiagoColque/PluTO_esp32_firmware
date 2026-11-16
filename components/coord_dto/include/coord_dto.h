@@ -5,12 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/*
- * Decoder for the pointing payload on device/<device_id>/coordinates/polar.
- * The format is defined in PluTO's docs/contracts/coordinates-dto.md, and the
- * section numbers below refer to it. It has no ESP-IDF dependencies on purpose,
- * so the same code also runs as a host test (test_host/).
- */
+/* Decoder for device/<device_id>/coordinates/polar; § numbers refer to
+ * coordinates-dto.md. No ESP-IDF, so it runs as a host test. */
 
 #define PLUTO_DTO_MAGIC       0x50
 #define PLUTO_DTO_FLAG_HOLD   0x01
@@ -20,8 +16,8 @@
 #define PLUTO_DTO_AZ_MAX_CDEG 35999
 #define PLUTO_DTO_EL_MAX_CDEG 9000
 
-/* Wire layout (§3). Only ever filled through memcpy, never by casting a
- * pointer into the received buffer (§6.2). */
+/* Wire layout (§3). Filled with memcpy only, never by casting a pointer into
+ * the received buffer (§6.2). */
 typedef struct __attribute__((packed)) {
     uint8_t magic;
     uint8_t flags;
@@ -64,22 +60,16 @@ typedef struct {
 } coord_dto_msg_t;
 
 /**
- * @brief Decode and validate one payload (§6.1 and §6.5).
+ * @brief Decode and validate one payload.
  *
- * Checks the length before reading any point, so a malformed payload can never
- * be read past its end. `out` is only meaningful when the result is
- * COORD_DTO_OK. The time-based rules (expired points, unsynced clock) need the
- * current time and belong to the caller.
+ * Checks the length before reading any point; out is valid only on
+ * COORD_DTO_OK. Time-based rules (§6.3) belong to the caller.
  */
 coord_dto_err_t coord_dto_decode(const uint8_t *payload, size_t payload_len, coord_dto_msg_t *out);
 
 bool coord_dto_is_hold(const coord_dto_msg_t *msg);
 
-/**
- * @brief Reject code reported on the state channel (device-state.md §5).
- *
- * Returns NULL for COORD_DTO_OK.
- */
+/** @brief Reject code for the state channel, NULL for COORD_DTO_OK. */
 const char *coord_dto_err_code(coord_dto_err_t err);
 
 #endif

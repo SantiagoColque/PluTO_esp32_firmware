@@ -69,9 +69,8 @@ bool pan_tilt_reachable(const pan_tilt_config_t *cfg, int32_t az_cdeg, int32_t e
 
 pan_tilt_mode_t pan_tilt_pose_mode(const pan_tilt_pose_t *pose)
 {
-    /* The zenith keeps the label: the azimuth is undefined there, and taking
-     * either mode would break the round trip of pan_tilt_from_azel() for a
-     * target at 90 degrees. */
+    /* The zenith keeps the label: azimuth is undefined there, and forcing a mode
+     * would break the pan_tilt_from_azel() round trip at 90 degrees. */
     if (pose->tilt_cdeg < ZENITH_CDEG || (pose->tilt_cdeg == ZENITH_CDEG && pose->mode == PAN_TILT_NORMAL)) {
         return PAN_TILT_NORMAL;
     }
@@ -92,8 +91,7 @@ void pan_tilt_to_azel(const pan_tilt_config_t *cfg,
     }
 }
 
-/* Comparisons only, no arithmetic, so a corrupted stored value near the int32
- * limits cannot overflow on its way to being rejected. */
+/* Comparisons only, so a corrupted stored value cannot overflow before it is rejected. */
 static bool range_valid(int32_t min_cdeg, int32_t max_cdeg)
 {
     return min_cdeg >= 0 && min_cdeg < max_cdeg && max_cdeg <= HALF_TURN_CDEG;

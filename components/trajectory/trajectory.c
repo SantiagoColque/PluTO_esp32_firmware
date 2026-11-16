@@ -15,8 +15,7 @@ static int32_t wrap_azimuth(int64_t az_cdeg)
     return (int32_t)wrapped;
 }
 
-/* Signed azimuth change from `from` to `to` along the shorter way around, so
- * crossing north goes 359.50 -> 0.00 -> 0.50 instead of all the way back. */
+/* Shorter way around, so crossing north goes 359.50 -> 0.50, not all the way back. */
 static int32_t shortest_azimuth_delta(int32_t from, int32_t to)
 {
     int32_t delta = to - from;
@@ -41,6 +40,8 @@ size_t trajectory_load(trajectory_t *traj,
                        int64_t tolerance_ms)
 {
     size_t first_kept = 0;
+    size_t old_kept = 0;
+    size_t new_count;
 
     if (count == 0 || count > TRAJECTORY_MAX_POINTS) {
         return 0;
@@ -59,9 +60,25 @@ size_t trajectory_load(trajectory_t *traj,
         return 0;
     }
 
-    traj->count = count - first_kept;
-    memcpy(traj->points, points + first_kept, traj->count * sizeof(traj->points[0]));
-    return traj->count;
+    /* A batch arrives ~2 s before its first point, so pending points before it
+     * stay or the target would jump ahead. Strictly before, so no instant repeats. */
+    while (old_kept < traj->count && traj->points[old_kept].t_ms < points[0].t_ms) {
+        old_kept++;
+    }
+    new_count = count - first_kept;
+
+    /* Out of room, the oldest go first. At the server's cadence (5 points, 2 s ahead)
+     * they have passed if points are 200+ ms apart; otherwise the target jumps ahead. */
+    if (old_kept + new_count > TRAJECTORY_MAX_POINTS) {
+        size_t dropped = old_kept + new_count - TRAJECTORY_MAX_POINTS;
+
+        old_kept -= dropped;
+        memmove(traj->points, traj->points + dropped, old_kept * sizeof(traj->points[0]));
+    }
+
+    memcpy(traj->points + old_kept, points + first_kept, new_count * sizeof(traj->points[0]));
+    traj->count = old_kept + new_count;
+    return new_count;
 }
 
 void trajectory_clear(trajectory_t *traj)
@@ -99,7 +116,7 @@ bool trajectory_target(const trajectory_t *traj, int64_t now_ms, int32_t *az_cde
         }
     }
 
-    /* Past the last point: stay there rather than extrapolate (§6.7). */
+    /* Past the last point: stay there rather than extrapolate. */
     last = &traj->points[traj->count - 1];
     *az_cdeg = last->az_cdeg;
     *el_cdeg = last->el_cdeg;

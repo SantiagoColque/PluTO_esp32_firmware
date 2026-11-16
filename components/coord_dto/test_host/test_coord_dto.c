@@ -15,7 +15,7 @@ static int s_failures;
         }                                                                        \
     } while (0)
 
-/* The worked example of docs/contracts/coordinates-dto.md §7. */
+/* Worked example from coordinates-dto.md §7. */
 static const char *EXAMPLE_HEX =
     "500003403136b6a0010000702936b6a0010000"
     "0000000039309411"

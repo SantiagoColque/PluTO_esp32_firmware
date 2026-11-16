@@ -31,7 +31,7 @@ has a strange-looking bound, the reason is usually a specific RNF (see
    dashboard stays reachable and reconnection keeps going for as long as it takes.
 6. SNTP. A missing clock is a warning, not a reboot — the poller keeps trying.
 7. `start_rotor()`: the stored calibration (an invalid one keeps the servos stopped),
-   the servo driver, the rotor state and the rotor task.
+   the servo driver, the encoders if built in, the rotor state and the rotor task.
 8. `mqtt_manager_init()`, with `coordinates_message_handler` as the data callback.
 
 Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, its
@@ -42,11 +42,12 @@ Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, i
   `s_rotor_lock` (decode, validate, load the trajectory) and then publishes the state. It
   never touches the servos. Its own tick can set the very first pose as is (there is no
   position to ramp from), and `rotor_task` sends it on its next tick.
-- `rotor_task` runs every 50 ms with a monotonic `dt_ms` from `esp_timer`. `rotor_tick()`
-  follows the trajectory through the motion profile, and outside the lock the commanded
-  pose goes to `servo_driver_set()`, or `servo_driver_release()` once
-  `rotor_outputs_resting()` says the axes have rested (HU-35). **This is where the servos
-  are driven.**
+- `rotor_task` runs every 50 ms with a monotonic `dt_ms` from `esp_timer`. With
+  `CONFIG_PLUTO_ENCODERS` it first reads both encoders, outside the lock, and hands the
+  angles to `rotor_set_measured()`. `rotor_tick()` follows the trajectory through the
+  motion profile, and outside the lock the commanded pose goes to `servo_driver_set()`,
+  or `servo_driver_release()` once `rotor_outputs_resting()` says the axes have rested
+  (HU-35). **This is where the servos are driven.**
 - The same task publishes the state on `device/<device_id>/state`: every second while
   tracking, every ten at rest, and at once when the mode changes.
 
@@ -61,11 +62,13 @@ Each is a standard IDF component under `components/`, with its public API in
   than copying, because some IDF APIs store the pointer they are handed —
   `esp_sntp_setservername()` does — and a field of a stack-allocated struct would dangle.
   It also keeps the mount's calibration (`pluto_calibration_t`: `az_ref`, the pan and
-  tilt limits and each servo's pulse at 0 and at 180 degrees) in a namespace of its own,
-  `pluto_cal`, so that `config_store_factory_reset()`, which erases `pluto_cfg` to
-  re-provision the WiFi, leaves it alone. It stores plain integers and checks nothing:
-  `start_rotor()` checks the mount with `pan_tilt_config_valid()` and the driver checks
-  the pulses; if either is invalid the servos are not started.
+  tilt limits, each servo's pulse at 0 and at 180 degrees and each encoder's zero and
+  direction) in a namespace of its own, `pluto_cal`, so that
+  `config_store_factory_reset()`, which erases `pluto_cfg` to re-provision the WiFi,
+  leaves it alone. It stores plain integers and checks nothing: `start_rotor()` checks
+  the mount with `pan_tilt_config_valid()` and the driver checks the pulses; if either is
+  invalid the servos are not started. `POST /api/calibration` makes the same checks
+  before saving.
 - **wifi_manager** — the state machine: `IDLE → CONNECTING → CONNECTED`, plus
   `PROVISIONING` (AP only, never configured) and `AP_FALLBACK` (AP up while the station
   keeps retrying). Reconnect backoff doubles from 1 s to `WIFI_RECONNECT_MAX_BACKOFF_SEC`
@@ -101,8 +104,9 @@ The pointing pipeline is split the same way: pure components with host tests
 - **coord_dto** — decodes and validates the binary setpoint batch of
   `coordinates-dto.md`, with the reject codes of `device-state.md` §5.
 - **trajectory** — what the board does between messages: a new batch replaces the
-  pending points, the target is interpolated in time with the azimuth taking the short
-  way round, it stays on the last point, and a `HOLD` drops everything pending.
+  pending points from its first instant on (the earlier ones stay, as in the server's
+  `merge_trajectory`), the target is interpolated in time with the azimuth taking the
+  short way round, it stays on the last point, and a `HOLD` drops everything pending.
 - **pan_tilt** — geographic az/el to the angles of two 180-degree servos, flipping past
   the zenith for the back half of the sky (`coordinates-dto.md` §9). Kinematics only:
   trims and pulses belong to `servo`.
@@ -110,8 +114,9 @@ The pointing pipeline is split the same way: pure components with host tests
   braking ramp after a `HOLD`, and when an axis has rested (HU-35). See its header.
 - **rotor** — the board's side of both contracts: takes payloads, applies the rules that
   need the clock and the mount, follows the trajectory through `motion_profile`, clamps
-  the commanded pose to the mount and writes the JSON state, which reports that pose.
-  See its header.
+  the commanded pose to the mount and writes the JSON state, which reports that pose
+  and, when the encoders give one, the measured position and its error against the
+  target (`meas` and `err_cdeg`, `device-state.md` §4). See its header.
 - **servo** — the two DS3218 on LEDC: 50 Hz, a 16-bit duty, one channel per servo.
   `servo_pulse` is the pure half: servo angle to pulse width with a two-point
   calibration per servo, which covers trim, scale, direction and the 270-degree version,
@@ -121,6 +126,13 @@ The pointing pipeline is split the same way: pure components with host tests
   `servo_driver_release()` stops the pulses on both channels for HU-35 (duty 0, so no
   pulse is cut short), and the next `servo_driver_set()` resumes them. Not yet checked on
   hardware.
+- **encoder** — one AS5600 per axis, each alone on one of the two I2C controllers because
+  its address is fixed. `encoder_angle` is the pure half: raw count to servo angle with
+  a zero and a direction per axis. `as5600` is the I2C half, on the new `i2c_master`
+  driver only (the legacy `driver/i2c.h` aborts at boot next to it): raw angle and
+  magnet status, with each problem logged once as it appears and clears. Behind
+  `CONFIG_PLUTO_ENCODERS`, off by default; the chip is not confirmed and nothing is
+  checked on hardware.
 
 ## HTTP API
 
@@ -139,6 +151,8 @@ first-time setup there is no password to type yet.
 | `/api/factory-reset` | POST | erase the network and dashboard settings (`pluto_cfg`); the mount calibration stays |
 | `/logs` | GET | the log page (gzipped `logs.html`), linked from the Status card |
 | `/api/logs` | GET | the newest `CONFIG_PLUTO_LOG_RING_LINES` lines from `log_ring`, oldest first |
+| `/api/calibration` | GET | the stored mount calibration, keyed by the fields of `pluto_calibration_t` |
+| `/api/calibration` | POST | replace it: all thirteen fields, whole numbers, checked like at boot; applies at the next restart |
 
 The dashboard's default password is derived from the MAC: `pluto-xxxxxx`, logged at boot.
 
@@ -156,8 +170,7 @@ The dashboard's default password is derived from the MAC: `pluto-xxxxxx`, logged
 The contracts live in the PluTO repo, under `docs/contracts/`: `coordinates-dto.md` for
 the batch (a packed little-endian list of az/el setpoints, each carrying the instant it
 must be reached, at `19 + 8*count` bytes) and `device-state.md` for `status` and
-`state`. Read them before touching either side. `docs/contract/coordinates-dto.md` in
-this repo is an older copy from before the decoder existed; do not go by it.
+`state`. Read them before touching either side.
 
 On the server, `mqtt_dispatch` bridges `plugin/<uuid>/coordinates/polar` to the device
 topic, and the ingest registers a board from its first `status` or `state`. It rejects
@@ -179,36 +192,21 @@ boot for development; it must never be enabled in a build that ships.
 Leaving `CONFIG_WIFI_SSID` empty is the intended production flow: the device starts
 unprovisioned and raises the setup portal. Setting it is a development shortcut.
 
-The mount's calibration follows the same seed rule, from two menus: `az_ref` and the
-joint limits from *"Mount calibration (first-boot seed)"* (`PLUTO_CAL_*`, in
-`main/Kconfig.projbuild`), and each servo's pulse at 0 and at 180 degrees from *"PluTO
-servos"* (`PLUTO_SERVO_*_US_AT_*`, in `components/servo/Kconfig`). All of it lives in
-the `pluto_cal` namespace, which the dashboard's factory reset does not touch. What does
-erase it is wiping the whole NVS partition: `idf.py erase-flash`, or `init_nvs()` in
-`main.c` when NVS reports no free pages or a new version. The next boot seeds it again.
-Until the dashboard can edit it (card 4b), changing a stored calibration on a board means
-setting menuconfig and booting once with `CONFIG_PLUTO_FORCE_KCONFIG_SEED`, which
-re-seeds the network settings too.
-
-The rest of the *"PluTO servos"* menu is compiled in, so a change there means
-reflashing: the signal pins (25 and 26, leaving 21/22 and 32/33 for the encoders' I2C)
-and the DS3218 version (270 degrees by default, the narrow range, until the servos are
-identified). The version only sets the pulses' defaults: once `sdkconfig` exists,
-changing it leaves the pulses saved there alone.
-
-The *"PluTO motion profile"* menu (`components/motion_profile/Kconfig`) is compiled in
-the same way: top speed, acceleration and rest timeout, one set for both axes, in
-degrees; `start_rotor()` converts them to centidegrees.
+The mount calibration (`az_ref`, the joint limits, each servo's pulses and each encoder's
+zero and direction) follows the same seed rule in its own namespace, `pluto_cal`, which
+the dashboard's factory reset keeps. Once stored, the dashboard edits it
+(`/api/calibration`) and it applies at the next restart. The servo pins and version, the
+motion profile and `CONFIG_PLUTO_ENCODERS` are compile-time; the encoders' I2C pins are
+fixed in `main.c`. Every option is in `README.md`, *Configuration*.
 
 ## Build and flash
 
-    idf.py set-target esp32
     idf.py menuconfig          # optional; seeds a blank NVS and sets the servo pins
     idf.py build
     idf.py -p /dev/ttyUSB0 flash monitor
 
-It needs ESP-IDF v5.5 or later: `log_ring` checks `CONFIG_LOG_VERSION`, which older
-versions lack. Development uses v5.5.2.
+The ESP-IDF version (v5.5.x) and the deployment steps are in `README.md`; keep it in
+step when flashing, provisioning, recovery or a menuconfig option changes.
 
 `sdkconfig` is not committed (`.gitignore` excludes it): each checkout generates its own
 from `sdkconfig.defaults`, which holds the choices that carry a reason:
@@ -258,18 +256,18 @@ server's encoder, which the decoder's host test must read back. After a change t
 
 Roughly in the order the SRS prioritizes them:
 
-- **Editing the calibration on a running board**: the mechanical limits (HU-07, which
-  RNF-07.1 puts in firmware), the north offset (HU-09 / RF-09.1) and the servo pulses are
-  stored and applied at boot, but nothing writes them after the seed. A setter with its
-  caller (the dashboard or a command) is card 4b; until then it takes a reflash with
-  `CONFIG_PLUTO_FORCE_KCONFIG_SEED`.
-- **Homing / zero calibration** (HU-28).
+- **Homing / zero calibration** (HU-28). With absolute encoders it is capturing an
+  offset, not searching for one; today each encoder's zero is typed into the dashboard.
+  Missing: capturing it on the board, the MQTT command that triggers it (its topic is to
+  be agreed in the server's contracts) and a dashboard jog to move a servo by hand.
 - **Bench tuning of the motion profile**: the speed, acceleration and rest timeout are
   compile-time and shared by both axes, and the rest state cuts both outputs at once.
   Whether the DS3218 holds the tilt under the antenna without pulses, and so which
   outputs may be cut, is still to be measured.
-- **Telemetry of actual position** (HU-24, HU-29): the state reports the commanded pose
-  after the motion profile, not a measured one.
-  Elevation threshold (HU-30).
+- **Telemetry of actual position on hardware** (HU-24, HU-29): `meas` and `err_cdeg` are
+  implemented behind `CONFIG_PLUTO_ENCODERS`, but the chip is unconfirmed, the encoders
+  are not mounted and their zero is typed in by hand (homing above).
+- **Elevation threshold** (HU-30): not for the firmware. The server cuts the trajectory
+  below `Rotor.min_elevation_deg`; the board only enforces the mount limits.
 - **OTA updates** (HU-32) — the partition table has a single `factory` app slot, so
   adding OTA means changing it.

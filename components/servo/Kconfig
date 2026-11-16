@@ -25,8 +25,9 @@ menu "PluTO servos"
             pulses already saved in it: they count as set by hand. Set the
             four pulses again, or delete their lines from sdkconfig and run
             idf.py reconfigure to get the new version's defaults. And since
-            the pulses only seed NVS, a board that already stored them needs
-            PLUTO_FORCE_KCONFIG_SEED for one boot to take the new ones.
+            the pulses only seed NVS, a board that already stored them takes
+            new ones from the dashboard, or from PLUTO_FORCE_KCONFIG_SEED for
+            one boot.
 
         config PLUTO_SERVO_DS3218_180
             bool "180 degrees"
@@ -55,7 +56,7 @@ menu "PluTO servos"
 
     comment "Two-point calibration: the pulse that puts each servo at 0 and at 180 degrees."
     comment "It covers trim, scale and direction; reverse a servo by swapping the two."
-    comment "First-boot seed: once NVS holds the calibration, the stored pulses win."
+    comment "First-boot seed: once NVS holds them, the stored pulses win; the dashboard edits them."
 
     config PLUTO_SERVO_PAN_US_AT_0
         int "Pan pulse at 0 degrees (us)"
@@ -68,9 +69,9 @@ menu "PluTO servos"
             in servo_pulse.h). Measure the real one on the bench.
 
             Seeds NVS when it holds no calibration yet; afterwards the stored
-            value wins, until PLUTO_FORCE_KCONFIG_SEED re-seeds it. A pair
-            with both points equal keeps the servos stopped, with an error in
-            the log.
+            value wins: change it from the dashboard, or re-seed it with
+            PLUTO_FORCE_KCONFIG_SEED. A seeded pair with both points equal
+            keeps the servos stopped, with an error in the log.
 
     config PLUTO_SERVO_PAN_US_AT_180
         int "Pan pulse at 180 degrees (us)"

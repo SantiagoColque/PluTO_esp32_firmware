@@ -1,0 +1,16 @@
+menu "PluTO encoders"
+
+    comment "Compiled in: changing anything here means reflashing."
+
+    config PLUTO_ENCODERS
+        bool "Read the servo angles from AS5600 encoders"
+        default n
+        help
+            Reads each axis from an AS5600 on an I2C bus of its own and
+            reports the measured position and the tracking error in the state
+            (meas and err_cdeg, device-state.md). Off, both go out as null and
+            nothing touches the I2C pins (fixed in main.c: pan on 21/22, tilt
+            on 32/33). Off until the encoders are mounted: the chip is not
+            confirmed yet.
+
+endmenu

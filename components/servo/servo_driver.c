@@ -6,9 +6,8 @@
 #include "esp_check.h"
 #include "esp_log.h"
 
-/* The ESP32's high-speed group: its channels latch a new duty without the
- * extra update step the low-speed ones need, and the low-speed group stays
- * free for anything else. It only exists on the plain ESP32, the target. */
+/* High-speed group: latches a new duty without the low-speed update step.
+ * Only the plain ESP32 has it. */
 #define SERVO_SPEED_MODE LEDC_HIGH_SPEED_MODE
 #define SERVO_TIMER LEDC_TIMER_0
 
@@ -20,21 +19,16 @@ static const char *TAG = "servo";
 typedef struct {
     ledc_channel_t channel;
     servo_calibration_t calibration;
-    uint32_t duty; /* last duty written; 0 means no pulses (a real pulse is never 0) */
+    uint32_t duty; /* last written; 0 means no pulses */
 } servo_axis_t;
 
 static servo_axis_t s_pan = {.channel = LEDC_CHANNEL_0};
 static servo_axis_t s_tilt = {.channel = LEDC_CHANNEL_1};
 static bool s_started;
 
-/*
- * Pins of the ESP32 a servo signal must not use. 6-11 run the SPI flash, and
- * driving one crashes the chip. 0, 2, 5, 12 and 15 are strapping pins sampled
- * at reset, where whatever the servo input does to the line can change the
- * boot mode, or with 12 the flash voltage. 1 and 3 are UART0, the console. 14
- * puts out a PWM of its own during boot, which would jerk the servo on every
- * reset. 34-39 are inputs only.
- */
+/* 6-11 run the SPI flash. 0, 2, 5, 12 and 15 are strapping pins the servo line
+ * could flip at reset (12 sets the flash voltage). 1 and 3 are the console, 14
+ * puts out PWM during boot and would jerk the servo, 34-39 are input only. */
 static bool pin_is_safe(int gpio)
 {
     if (gpio < 0 || gpio > 33) {
@@ -87,10 +81,8 @@ static esp_err_t start_channel(servo_axis_t *axis, const servo_axis_config_t *co
     return ledc_channel_config(&channel);
 }
 
-/* The new duty is latched at the end of the current frame, so the pulse in
- * flight is never cut short. That is why a release writes duty 0 instead of
- * calling ledc_stop(), which can truncate a pulse below 500 us. Once LEDC is
- * configured these calls only fail on bad arguments, and these are constant. */
+/* Duty latches at the end of the frame, so release writes 0 instead of calling
+ * ledc_stop(), which can cut a pulse short. Errors only come from bad args. */
 static void write_duty(servo_axis_t *axis, uint32_t duty)
 {
     if (duty != axis->duty) {
@@ -111,8 +103,7 @@ esp_err_t servo_driver_init(const servo_driver_config_t *config)
     };
     esp_err_t err;
 
-    /* Everything is checked before LEDC is touched, so a bad configuration
-     * never puts out a single pulse. */
+    /* Check everything before touching LEDC, so a bad config never emits a pulse. */
     err = check_axis("pan", &config->pan);
     if (err == ESP_OK) {
         err = check_axis("tilt", &config->tilt);

@@ -90,7 +90,8 @@ menu "PluTO Firmware Configuration"
             help
                 Geographic azimuth the pan faces at 0, clockwise from north:
                 9000 means the pan's 0 points east. Seeds NVS when it holds no
-                calibration yet; afterwards the stored value wins.
+                calibration yet; afterwards the stored value wins, and the
+                dashboard edits it.
 
         config PLUTO_CAL_PAN_MIN_CDEG
             int "Pan lower limit (centidegrees)"
