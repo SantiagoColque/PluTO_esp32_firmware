@@ -7,11 +7,6 @@
 #include "esp_log.h"
 #include "mqtt_client.h"
 #include "sdkconfig.h"
-#include "wifi_manager.h"
-
-#ifndef CONFIG_MQTT_TOPIC_SUBSCRIPTION
-#define CONFIG_MQTT_TOPIC_SUBSCRIPTION "device/subscription"
-#endif
 
 #define MQTT_TOPIC_LEN 64
 
@@ -26,7 +21,6 @@ static const char *TAG = "mqtt_manager";
 static esp_mqtt_client_handle_t s_client;
 static mqtt_data_cb_t s_data_cb;
 static bool s_mqtt_connected;
-static char s_device_id[WIFI_DEVICE_ID_LEN];
 static char s_coordinates_topic[MQTT_TOPIC_LEN];
 static char s_status_topic[MQTT_TOPIC_LEN];
 static char s_state_topic[MQTT_TOPIC_LEN];
@@ -44,7 +38,6 @@ static void mqtt_event_handler(void *handler_args,
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
     {
-        int registration_msg_id;
         int subscribe_msg_id;
 
         s_mqtt_connected = true;
@@ -52,18 +45,6 @@ static void mqtt_event_handler(void *handler_args,
 
         /* Retained for late subscribers; the last will overwrites it with "offline". */
         esp_mqtt_client_publish(s_client, s_status_topic, STATUS_ONLINE, 0, 1, 1);
-
-        registration_msg_id = esp_mqtt_client_publish(s_client,
-                                                      CONFIG_MQTT_TOPIC_SUBSCRIPTION,
-                                                      s_device_id,
-                                                      0,
-                                                      1,
-                                                      0);
-        ESP_LOGI(TAG,
-                 "Published device registration to %s with device_id=%s (msg_id=%d)",
-                 CONFIG_MQTT_TOPIC_SUBSCRIPTION,
-                 s_device_id,
-                 registration_msg_id);
 
         subscribe_msg_id = esp_mqtt_client_subscribe(s_client, s_coordinates_topic, 1);
         ESP_LOGI(TAG, "Subscribed to: %s (msg_id=%d)", s_coordinates_topic, subscribe_msg_id);
@@ -132,10 +113,9 @@ esp_err_t mqtt_manager_init(mqtt_data_cb_t data_cb, const char *device_id)
     }
 
     s_data_cb = data_cb;
-    strlcpy(s_device_id, device_id, sizeof(s_device_id));
-    snprintf(s_coordinates_topic, sizeof(s_coordinates_topic), "device/%s/coordinates/polar", s_device_id);
-    snprintf(s_status_topic, sizeof(s_status_topic), "device/%s/status", s_device_id);
-    snprintf(s_state_topic, sizeof(s_state_topic), "device/%s/state", s_device_id);
+    snprintf(s_coordinates_topic, sizeof(s_coordinates_topic), "device/%s/coordinates/polar", device_id);
+    snprintf(s_status_topic, sizeof(s_status_topic), "device/%s/status", device_id);
+    snprintf(s_state_topic, sizeof(s_state_topic), "device/%s/state", device_id);
 
     const esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = cfg->mqtt_uri,

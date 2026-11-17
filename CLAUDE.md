@@ -34,9 +34,8 @@ has a strange-looking bound, the reason is usually a specific RNF (see
    the servo driver, the encoders if built in, the rotor state and the rotor task.
 8. `mqtt_manager_init()`, with `coordinates_message_handler` as the data callback.
 
-Once MQTT is up, the device publishes `online` on `device/<device_id>/status`, its
-`device_id` on `device/subscription`, and subscribes to
-`device/<device_id>/coordinates/polar`. From there the pointing pipeline runs in `main.c`:
+Once MQTT is up, the device publishes `online` on `device/<device_id>/status` and
+subscribes to `device/<device_id>/coordinates/polar`. From there the pointing pipeline runs in `main.c`:
 
 - `coordinates_message_handler` hands each payload to `rotor_handle_payload()` under
   `s_rotor_lock` (decode, validate, load the trajectory) and then publishes the state. It
@@ -95,7 +94,7 @@ Each is a standard IDF component under `components/`, with its public API in
   `log_ring_core.c` to show on the page. The dashboard password line is redacted,
   because the page is reachable without login on the provisioning AP.
 - **mqtt_manager** — `esp-mqtt` client: the `status` publish with its last will, the
-  registration publish, the control subscription with a `mqtt_data_cb_t` callback
+  control subscription with a `mqtt_data_cb_t` callback
   handed in by `main`, and `mqtt_manager_publish_state()`.
 
 The pointing pipeline is split the same way: pure components with host tests
@@ -163,9 +162,9 @@ The dashboard's default password is derived from the MAC: `pluto-xxxxxx`, logged
 | `device/<device_id>/coordinates/polar` | server → device | binary setpoint batch, QoS 1, never retained |
 | `device/<device_id>/status` | device → server | `online`, retained; `offline` is the last will |
 | `device/<device_id>/state` | device → server | JSON state document, QoS 0 |
-| `device/subscription` | device → server | the bare `device_id`, published on every connect |
 
-`device_id` is the station MAC as twelve lowercase hex digits.
+`device_id` is the station MAC as twelve lowercase hex digits. The server learns about a
+board from its retained `status`; there is no separate registration topic.
 
 The contracts live in the PluTO repo, under `docs/contracts/`: `coordinates-dto.md` for
 the batch (a packed little-endian list of az/el setpoints, each carrying the instant it
@@ -173,9 +172,7 @@ must be reached, at `19 + 8*count` bytes) and `device-state.md` for `status` and
 `state`. Read them before touching either side.
 
 On the server, `mqtt_dispatch` bridges `plugin/<uuid>/coordinates/polar` to the device
-topic, and the ingest registers a board from its first `status` or `state`. It rejects
-`device/subscription`, which the firmware still publishes: the topic is a compile-time
-constant (`CONFIG_MQTT_TOPIC_SUBSCRIPTION`), kept until both sides agree to drop it.
+topic, and the ingest registers a board from its first `status` or `state`.
 
 Note that two topics end in `/coordinates/polar` and carry different encodings — the
 `plugin/...` one is JSON, the `device/...` one is the binary DTO. That is deliberate but

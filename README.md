@@ -244,7 +244,6 @@ servos**, **> PluTO motion profile** and **> PluTO encoders**. Each option is
 | `MQTT_BROKER_PASSWORD` | empty | Seed | The server's `MQTT_PASSWORD`. |
 | `NTP_SERVER` | `pool.ntp.org` | Seed | Clock source; trajectories are rejected until it syncs. |
 | `NTP_TIMEZONE` | `UTC0` | Seed | POSIX time zone for the dashboard. |
-| `MQTT_TOPIC_SUBSCRIPTION` | `device/subscription` | Build | Where the board announces its `device_id`; the server ignores it. |
 | `PLUTO_EXPIRED_POINT_TOLERANCE_MS` | 500 (0–10000) | Build | How late a trajectory point may be and still run. |
 | `PLUTO_LOG_RING_LINES` | 20 (5–64) | Build | Lines kept for `/logs`. |
 | `PLUTO_FORCE_KCONFIG_SEED` | off | Build | Re-seed both namespaces at every boot; never in a build that ships. |

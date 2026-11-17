@@ -37,15 +37,6 @@ menu "PluTO Firmware Configuration"
         help
             Password used to authenticate against the MQTT broker.
 
-    config MQTT_TOPIC_SUBSCRIPTION
-        string "MQTT device registration topic"
-        default "device/subscription"
-        help
-            Generic topic where the device publishes its device_id to request a
-            control subscription. This is part of the backend contract, not site
-            configuration, so it stays a compile-time constant and is not
-            exposed on the dashboard.
-
     config PLUTO_EXPIRED_POINT_TOLERANCE_MS
         int "Tolerance before a trajectory point counts as expired (ms)"
         default 500
